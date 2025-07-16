@@ -20,7 +20,7 @@
 namespace ChatShop;
 
 // If this file is called directly, abort.
-if (! defined('WPINC')) {
+if (!defined('WPINC')) {
     die;
 }
 
@@ -38,7 +38,6 @@ define('CHATSHOP_PLUGIN_BASENAME', plugin_basename(__FILE__));
  */
 final class ChatShop
 {
-
     /**
      * The single instance of the class
      *
@@ -54,6 +53,14 @@ final class ChatShop
      * @since 1.0.0
      */
     private $loader;
+
+    /**
+     * The component loader instance
+     *
+     * @var ChatShop_Component_Loader
+     * @since 1.0.0
+     */
+    private $component_loader;
 
     /**
      * Main ChatShop Instance
@@ -79,7 +86,9 @@ final class ChatShop
      */
     private function __construct()
     {
+        $this->load_dependencies();
         $this->init_loader();
+        $this->init_component_system();
         $this->set_locale();
         $this->check_requirements();
         $this->init_hooks();
@@ -106,6 +115,20 @@ final class ChatShop
     }
 
     /**
+     * Load required dependencies
+     *
+     * @since 1.0.0
+     */
+    private function load_dependencies()
+    {
+        // Load component registry first
+        require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-component-registry.php';
+
+        // Load component loader
+        require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-component-loader.php';
+    }
+
+    /**
      * Initialize the loader
      *
      * @since 1.0.0
@@ -113,6 +136,16 @@ final class ChatShop
     private function init_loader()
     {
         $this->loader = new ChatShop_Loader();
+    }
+
+    /**
+     * Initialize the component system
+     *
+     * @since 1.0.0
+     */
+    private function init_component_system()
+    {
+        $this->component_loader = new ChatShop_Component_Loader();
     }
 
     /**
@@ -159,7 +192,7 @@ final class ChatShop
         require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-activator.php';
         $errors = ChatShop_Activator::get_activation_errors();
 
-        if (! empty($errors)) {
+        if (!empty($errors)) {
             add_action('admin_notices', function () use ($errors) {
 ?>
                 <div class="notice notice-error">
@@ -216,6 +249,29 @@ final class ChatShop
     {
         return $this->loader;
     }
+
+    /**
+     * Get the component loader
+     *
+     * @since 1.0.0
+     * @return ChatShop_Component_Loader
+     */
+    public function get_component_loader()
+    {
+        return $this->component_loader;
+    }
+
+    /**
+     * Get a specific component instance
+     *
+     * @param string $component_id Component ID
+     * @return mixed|null
+     * @since 1.0.0
+     */
+    public function get_component($component_id)
+    {
+        return $this->component_loader ? $this->component_loader->get_component($component_id) : null;
+    }
 }
 
 /**
@@ -227,7 +283,6 @@ final class ChatShop
  */
 class ChatShop_Loader
 {
-
     /**
      * The array of actions registered with WordPress
      *
@@ -275,16 +330,16 @@ class ChatShop_Loader
     }
 
     /**
-     * Add hook to the collection
+     * Add hook to the appropriate collection
      *
      * @since 1.0.0
-     * @param array  $hooks         The collection of hooks (actions or filters)
+     * @param array  $hooks         The collection of hooks that is being registered
      * @param string $hook          The name of the WordPress hook
      * @param object $component     A reference to the instance of the object on which the hook is defined
      * @param string $callback      The name of the function definition on the $component
      * @param int    $priority      The priority at which the function should be fired
      * @param int    $accepted_args The number of arguments that should be passed to the $callback
-     * @return array The collection of hooks
+     * @return array
      */
     private function add($hooks, $hook, $component, $callback, $priority, $accepted_args)
     {
@@ -293,14 +348,14 @@ class ChatShop_Loader
             'component'     => $component,
             'callback'      => $callback,
             'priority'      => $priority,
-            'accepted_args' => $accepted_args,
+            'accepted_args' => $accepted_args
         );
 
         return $hooks;
     }
 
     /**
-     * Register the filters and actions with WordPress
+     * Register hooks with WordPress
      *
      * @since 1.0.0
      */
