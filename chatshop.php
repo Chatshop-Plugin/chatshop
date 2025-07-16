@@ -272,6 +272,17 @@ final class ChatShop
     {
         return $this->component_loader ? $this->component_loader->get_component($component_id) : null;
     }
+
+    /**
+     * Check if premium features are available
+     *
+     * @return bool
+     * @since 1.0.0
+     */
+    public function is_premium()
+    {
+        return chatshop_is_premium();
+    }
 }
 
 /**
@@ -414,6 +425,149 @@ register_deactivation_hook(__FILE__, __NAMESPACE__ . '\chatshop_deactivate');
 function chatshop()
 {
     return ChatShop::instance();
+}
+
+/**
+ * Check if premium features are available
+ *
+ * Determines if the user has access to premium features through license validation.
+ *
+ * @since 1.0.0
+ * @return bool True if premium features are available, false otherwise
+ */
+function chatshop_is_premium()
+{
+    static $is_premium = null;
+
+    // Cache the result to avoid multiple checks
+    if ($is_premium !== null) {
+        return $is_premium;
+    }
+
+    // Allow override via filter for development/testing
+    $override = apply_filters('chatshop_premium_override', null);
+    if ($override !== null) {
+        $is_premium = (bool) $override;
+        return $is_premium;
+    }
+
+    // Check for premium license key
+    $license_key = get_option('chatshop_license_key', '');
+    if (empty($license_key)) {
+        $is_premium = false;
+        return $is_premium;
+    }
+
+    // Validate license key format (basic check)
+    if (!chatshop_validate_license_format($license_key)) {
+        $is_premium = false;
+        return $is_premium;
+    }
+
+    // Check license status from transient cache
+    $license_status = get_transient('chatshop_license_status');
+    if ($license_status !== false) {
+        $is_premium = ($license_status === 'valid');
+        return $is_premium;
+    }
+
+    // Validate license with remote server
+    $is_premium = chatshop_validate_license_remote($license_key);
+
+    // Cache the result for 24 hours
+    set_transient('chatshop_license_status', $is_premium ? 'valid' : 'invalid', DAY_IN_SECONDS);
+
+    return $is_premium;
+}
+
+/**
+ * Validate license key format
+ *
+ * @param string $license_key License key to validate
+ * @return bool
+ * @since 1.0.0
+ */
+function chatshop_validate_license_format($license_key)
+{
+    // License format: CHATSHOP-XXXX-XXXX-XXXX-XXXX (32 chars + hyphens)
+    $pattern = '/^CHATSHOP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/';
+    return preg_match($pattern, strtoupper($license_key));
+}
+
+/**
+ * Validate license with remote server
+ *
+ * @param string $license_key License key to validate
+ * @return bool
+ * @since 1.0.0
+ */
+function chatshop_validate_license_remote($license_key)
+{
+    // For now, return false (free version)
+    // In premium version, this would validate against license server
+    $validation_url = apply_filters('chatshop_license_validation_url', '');
+
+    if (empty($validation_url)) {
+        return false;
+    }
+
+    $response = wp_remote_post($validation_url, array(
+        'timeout' => 15,
+        'body' => array(
+            'license_key' => sanitize_text_field($license_key),
+            'domain' => esc_url_raw(home_url()),
+            'version' => CHATSHOP_VERSION,
+        ),
+        'headers' => array(
+            'User-Agent' => 'ChatShop/' . CHATSHOP_VERSION . '; ' . home_url(),
+        ),
+    ));
+
+    if (is_wp_error($response)) {
+        error_log('ChatShop: License validation failed - ' . $response->get_error_message());
+        return false;
+    }
+
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+
+    return isset($data['valid']) && $data['valid'] === true;
+}
+
+/**
+ * Get premium features list
+ *
+ * @return array
+ * @since 1.0.0
+ */
+function chatshop_get_premium_features()
+{
+    return apply_filters('chatshop_premium_features', array(
+        'advanced_analytics',
+        'bulk_messaging',
+        'custom_payment_links',
+        'priority_support',
+        'white_label',
+        'api_access',
+        'advanced_automation',
+    ));
+}
+
+/**
+ * Check if a specific premium feature is available
+ *
+ * @param string $feature Feature name to check
+ * @return bool
+ * @since 1.0.0
+ */
+function chatshop_has_premium_feature($feature)
+{
+    if (!chatshop_is_premium()) {
+        return false;
+    }
+
+    $premium_features = chatshop_get_premium_features();
+    return in_array($feature, $premium_features, true);
 }
 
 // Initialize and run the plugin
