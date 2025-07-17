@@ -3,51 +3,42 @@
 /**
  * Component Loader for ChatShop Plugin
  *
- * Manages loading and initialization of modular components with enable/disable functionality.
- *
  * @package ChatShop
- * @since   1.0.0
+ * @subpackage ChatShop/includes
+ * @since 1.0.0
  */
 
 namespace ChatShop;
 
-// Exit if accessed directly.
+// Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
 }
 
 /**
- * ChatShop Component Loader Class
+ * Component Loader Class
  *
- * Loads modular components with dependency checking and enable/disable functionality.
+ * Handles automatic loading and initialization of plugin components
  *
  * @since 1.0.0
  */
 class ChatShop_Component_Loader
 {
     /**
-     * Registry instance
+     * Components directory path
      *
-     * @var ChatShop_Component_Registry
      * @since 1.0.0
+     * @var string
      */
-    private $registry;
+    private $components_dir;
 
     /**
-     * Loaded components
+     * Loaded component instances
      *
-     * @var array
      * @since 1.0.0
-     */
-    private $loaded_components = array();
-
-    /**
-     * Component settings
-     *
      * @var array
-     * @since 1.0.0
      */
-    private $component_settings = array();
+    private $instances = array();
 
     /**
      * Constructor
@@ -56,212 +47,298 @@ class ChatShop_Component_Loader
      */
     public function __construct()
     {
-        $this->registry = new ChatShop_Component_Registry();
-        $this->load_component_settings();
-        $this->init_hooks();
+        $this->components_dir = CHATSHOP_PLUGIN_DIR . 'components/';
+        $this->register_core_components();
     }
 
     /**
-     * Initialize WordPress hooks
-     *
-     * @since 1.0.0
-     */
-    private function init_hooks()
-    {
-        add_action('chatshop_init', array($this, 'load_components'));
-        add_action('init', array($this, 'register_default_components'), 1);
-    }
-
-    /**
-     * Load component settings from database
-     *
-     * @since 1.0.0
-     */
-    private function load_component_settings()
-    {
-        $this->component_settings = get_option('chatshop_component_settings', array(
-            'payment' => true,
-            'whatsapp' => true,
-            'analytics' => true,
-        ));
-    }
-
-    /**
-     * Register default components
-     *
-     * @since 1.0.0
-     */
-    public function register_default_components()
-    {
-        $components = array(
-            'payment' => array(
-                'name' => __('Payment System', 'chatshop'),
-                'class' => 'ChatShop\\Components\\Payment\\ChatShop_Payment_Manager',
-                'file' => CHATSHOP_PLUGIN_DIR . 'components/payment/class-chatshop-payment-manager.php',
-                'dependencies' => array(),
-                'version' => '1.0.0'
-            ),
-            'whatsapp' => array(
-                'name' => __('WhatsApp Integration', 'chatshop'),
-                'class' => 'ChatShop\\Components\\WhatsApp\\ChatShop_WhatsApp_Manager',
-                'file' => CHATSHOP_PLUGIN_DIR . 'components/whatsapp/class-chatshop-whatsapp-manager.php',
-                'dependencies' => array(),
-                'version' => '1.0.0'
-            ),
-            'analytics' => array(
-                'name' => __('Analytics', 'chatshop'),
-                'class' => 'ChatShop\\Components\\Analytics\\ChatShop_Analytics_Manager',
-                'file' => CHATSHOP_PLUGIN_DIR . 'components/analytics/class-chatshop-analytics-manager.php',
-                'dependencies' => array('payment', 'whatsapp'),
-                'version' => '1.0.0'
-            )
-        );
-
-        foreach ($components as $id => $component) {
-            $this->registry->register($id, $component);
-        }
-    }
-
-    /**
-     * Load enabled components
+     * Load all registered components
      *
      * @since 1.0.0
      */
     public function load_components()
     {
-        $components = $this->registry->get_all();
+        // Get components in load order (considering dependencies)
+        $load_order = ChatShop_Component_Registry::get_load_order();
 
-        foreach ($components as $id => $component) {
-            if ($this->is_component_enabled($id) && $this->check_dependencies($id)) {
-                $this->load_component($id, $component);
-            }
+        foreach ($load_order as $component_id) {
+            $this->load_component($component_id);
         }
 
-        do_action('chatshop_components_loaded', $this->loaded_components);
+        // Hook for manual component registration
+        do_action('chatshop_components_loaded');
     }
 
     /**
-     * Load a single component
+     * Load a specific component
      *
-     * @param string $id Component ID
-     * @param array  $component Component data
      * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool|object
      */
-    private function load_component($id, $component)
+    public function load_component($component_id)
     {
-        if (isset($this->loaded_components[$id])) {
-            return;
+        // Check if already loaded
+        if (ChatShop_Component_Registry::is_loaded($component_id)) {
+            return ChatShop_Component_Registry::get_loaded_component($component_id);
         }
 
-        if (!file_exists($component['file'])) {
-            error_log("ChatShop: Component file not found - {$component['file']}");
-            return;
-        }
+        // Get component configuration
+        $component = ChatShop_Component_Registry::get_component($component_id);
 
-        require_once $component['file'];
-
-        if (!class_exists($component['class'])) {
-            error_log("ChatShop: Component class not found - {$component['class']}");
-            return;
-        }
-
-        try {
-            $instance = new $component['class']();
-            $this->loaded_components[$id] = $instance;
-
-            do_action("chatshop_component_loaded_{$id}", $instance);
-        } catch (Exception $e) {
-            error_log("ChatShop: Error loading component {$id} - " . $e->getMessage());
-        }
-    }
-
-    /**
-     * Check if component is enabled
-     *
-     * @param string $id Component ID
-     * @return bool
-     * @since 1.0.0
-     */
-    public function is_component_enabled($id)
-    {
-        return isset($this->component_settings[$id]) && $this->component_settings[$id];
-    }
-
-    /**
-     * Enable a component
-     *
-     * @param string $id Component ID
-     * @return bool
-     * @since 1.0.0
-     */
-    public function enable_component($id)
-    {
-        if (!$this->registry->is_registered($id)) {
+        if (!$component) {
+            chatshop_log("Component not found: {$component_id}", 'error');
             return false;
         }
 
-        $this->component_settings[$id] = true;
-        return update_option('chatshop_component_settings', $this->component_settings);
-    }
-
-    /**
-     * Disable a component
-     *
-     * @param string $id Component ID
-     * @return bool
-     * @since 1.0.0
-     */
-    public function disable_component($id)
-    {
-        $this->component_settings[$id] = false;
-        unset($this->loaded_components[$id]);
-        return update_option('chatshop_component_settings', $this->component_settings);
-    }
-
-    /**
-     * Check component dependencies
-     *
-     * @param string $id Component ID
-     * @return bool
-     * @since 1.0.0
-     */
-    private function check_dependencies($id)
-    {
-        $component = $this->registry->get($id);
-
-        if (empty($component['dependencies'])) {
-            return true;
+        // Check if disabled
+        if (!$component['enabled']) {
+            chatshop_log("Component disabled: {$component_id}", 'info');
+            return false;
         }
 
-        foreach ($component['dependencies'] as $dependency) {
-            if (!$this->is_component_enabled($dependency)) {
-                return false;
+        // Check dependencies
+        if (!ChatShop_Component_Registry::dependencies_met($component_id)) {
+            chatshop_log("Dependencies not met for component: {$component_id}", 'error');
+            return false;
+        }
+
+        // Load component file
+        $file_path = $this->get_component_file_path($component['file']);
+
+        if (!file_exists($file_path)) {
+            chatshop_log("Component file not found: {$file_path}", 'error');
+            return false;
+        }
+
+        require_once $file_path;
+
+        // Check if class exists
+        $class_name = $this->get_full_class_name($component['class']);
+
+        if (!class_exists($class_name)) {
+            chatshop_log("Component class not found: {$class_name}", 'error');
+            return false;
+        }
+
+        // Instantiate component
+        try {
+            $instance = new $class_name();
+
+            // Initialize if method exists
+            if (method_exists($instance, 'init')) {
+                $instance->init();
+            }
+
+            // Mark as loaded
+            ChatShop_Component_Registry::mark_loaded($component_id, $instance);
+            $this->instances[$component_id] = $instance;
+
+            chatshop_log("Component loaded successfully: {$component_id}", 'info');
+
+            // Fire action for component loaded
+            do_action("chatshop_component_loaded_{$component_id}", $instance);
+            do_action('chatshop_component_loaded', $component_id, $instance);
+
+            return $instance;
+        } catch (Exception $e) {
+            chatshop_log("Error loading component {$component_id}: " . $e->getMessage(), 'error');
+            return false;
+        }
+    }
+
+    /**
+     * Register core components
+     *
+     * @since 1.0.0
+     */
+    private function register_core_components()
+    {
+        // Admin component
+        ChatShop_Component_Registry::register_component('admin', array(
+            'name'        => 'Admin Interface',
+            'description' => 'WordPress admin interface for ChatShop',
+            'file'        => 'admin/class-chatshop-admin-component.php',
+            'class'       => 'ChatShop_Admin_Component',
+            'priority'    => 5
+        ));
+
+        // Payment component
+        ChatShop_Component_Registry::register_component('payment', array(
+            'name'        => 'Payment System',
+            'description' => 'Payment processing and gateway management',
+            'file'        => 'payment/class-chatshop-payment-component.php',
+            'class'       => 'ChatShop_Payment_Component',
+            'priority'    => 10
+        ));
+
+        // WhatsApp component
+        ChatShop_Component_Registry::register_component('whatsapp', array(
+            'name'        => 'WhatsApp Integration',
+            'description' => 'WhatsApp Business API integration',
+            'file'        => 'whatsapp/class-chatshop-whatsapp-component.php',
+            'class'       => 'ChatShop_WhatsApp_Component',
+            'priority'    => 15
+        ));
+
+        // Analytics component
+        ChatShop_Component_Registry::register_component('analytics', array(
+            'name'        => 'Analytics',
+            'description' => 'Analytics and reporting functionality',
+            'file'        => 'analytics/class-chatshop-analytics-component.php',
+            'class'       => 'ChatShop_Analytics_Component',
+            'dependencies' => array('payment', 'whatsapp'),
+            'priority'    => 20
+        ));
+
+        // Campaign component
+        ChatShop_Component_Registry::register_component('campaign', array(
+            'name'        => 'Campaign Management',
+            'description' => 'WhatsApp marketing campaigns',
+            'file'        => 'campaign/class-chatshop-campaign-component.php',
+            'class'       => 'ChatShop_Campaign_Component',
+            'dependencies' => array('whatsapp'),
+            'priority'    => 25
+        ));
+    }
+
+    /**
+     * Get component file path
+     *
+     * @since 1.0.0
+     * @param string $file Relative file path
+     * @return string
+     */
+    private function get_component_file_path($file)
+    {
+        // Handle absolute paths
+        if (strpos($file, '/') === 0) {
+            return CHATSHOP_PLUGIN_DIR . ltrim($file, '/');
+        }
+
+        // Handle relative paths from components directory
+        return $this->components_dir . $file;
+    }
+
+    /**
+     * Get full class name with namespace
+     *
+     * @since 1.0.0
+     * @param string $class_name Class name
+     * @return string
+     */
+    private function get_full_class_name($class_name)
+    {
+        // Add namespace if not present
+        if (strpos($class_name, '\\') === false) {
+            return '\\ChatShop\\' . $class_name;
+        }
+
+        return $class_name;
+    }
+
+    /**
+     * Get component instance
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return object|null
+     */
+    public function get_component_instance($component_id)
+    {
+        return isset($this->instances[$component_id]) ? $this->instances[$component_id] : null;
+    }
+
+    /**
+     * Get all loaded component instances
+     *
+     * @since 1.0.0
+     * @return array
+     */
+    public function get_all_instances()
+    {
+        return $this->instances;
+    }
+
+    /**
+     * Discover components from directory
+     *
+     * @since 1.0.0
+     * @param string $directory Directory path
+     */
+    public function discover_components($directory = null)
+    {
+        if (!$directory) {
+            $directory = $this->components_dir;
+        }
+
+        if (!is_dir($directory)) {
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($directory, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::LEAVES_ONLY
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->getExtension() === 'php' && strpos($file->getFilename(), 'component.php') !== false) {
+                $this->try_auto_register_component($file->getPathname());
             }
         }
-
-        return true;
     }
 
     /**
-     * Get loaded component instance
+     * Try to auto-register a component from file
      *
-     * @param string $id Component ID
-     * @return mixed|null
      * @since 1.0.0
+     * @param string $file_path Full file path
      */
-    public function get_component($id)
+    private function try_auto_register_component($file_path)
     {
-        return isset($this->loaded_components[$id]) ? $this->loaded_components[$id] : null;
-    }
+        // Read file content to find component header
+        $content = file_get_contents($file_path);
 
-    /**
-     * Get all loaded components
-     *
-     * @return array
-     * @since 1.0.0
-     */
-    public function get_loaded_components()
+        if (preg_match('/\/\*\*\s*\*\s*Component:\s*(.+?)\s*\*/s', $content, $matches)) {
+            $header = $matches[1];
+
+            // Parse component header
+            if (preg_match_all('/\*\s*(\w+):\s*(.+)$/m', $header, $header_matches, PREG_SET_ORDER)) {
+                $config = array();
+
+                foreach ($header_matches as $match) {
+                    $key = strtolower($match[1]);
+                    $value = trim($match[2]);
+
+                    if ($key === 'dependencies') {
+                        $value = array_map('trim', explode(',', $value));
+                    }
+
+                    $config[$key] = $value;
+                }
+
+                // Register component if valid
+                if (isset($config['id'], $config['class'])) {
+                    $config['file'] = str_replace($this->components_dir, '', $file_path);
+                    ChatShop_Component_Registry::register_component($config['id'], $config);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Helper function for logging (fallback if logger not available)
+ *
+ * @since 1.0.0
+ * @param string $message Log message
+ * @param string $level   Log level
+ */
+if (!function_exists('chatshop_log')) {
+    function chatshop_log($message, $level = 'info')
     {
-        return $this->loaded_components;
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("[ChatShop] [{$level}] {$message}");
+        }
     }
 }

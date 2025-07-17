@@ -20,7 +20,7 @@
 namespace ChatShop;
 
 // If this file is called directly, abort.
-if (! defined('WPINC')) {
+if (!defined('WPINC')) {
     die;
 }
 
@@ -32,13 +32,22 @@ define('CHATSHOP_PLUGIN_FILE', __FILE__);
 define('CHATSHOP_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 /**
+ * Load core classes
+ */
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-loader.php';
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-i18n.php';
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-activator.php';
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-deactivator.php';
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-component-registry.php';
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-component-loader.php';
+
+/**
  * Main ChatShop class
  *
  * @since 1.0.0
  */
 final class ChatShop
 {
-
     /**
      * The single instance of the class
      *
@@ -70,6 +79,14 @@ final class ChatShop
      * @since 1.0.0
      */
     private $public;
+
+    /**
+     * Component loader instance
+     *
+     * @var ChatShop_Component_Loader
+     * @since 1.0.0
+     */
+    private $component_loader;
 
     /**
      * Main ChatShop Instance
@@ -131,34 +148,18 @@ final class ChatShop
      */
     private function load_dependencies()
     {
-        // Core includes
-        $includes_path = CHATSHOP_PLUGIN_DIR . 'includes/';
-
-        // Load core classes
-        if (file_exists($includes_path . 'class-chatshop-activator.php')) {
-            require_once $includes_path . 'class-chatshop-activator.php';
-        }
-
-        if (file_exists($includes_path . 'class-chatshop-deactivator.php')) {
-            require_once $includes_path . 'class-chatshop-deactivator.php';
-        }
-
-        if (file_exists($includes_path . 'class-chatshop-i18n.php')) {
-            require_once $includes_path . 'class-chatshop-i18n.php';
-        }
-
         // Load admin class if in admin
         if (is_admin()) {
-            $admin_path = CHATSHOP_PLUGIN_DIR . 'admin/';
-            if (file_exists($admin_path . 'class-chatshop-admin.php')) {
-                require_once $admin_path . 'class-chatshop-admin.php';
+            $admin_path = CHATSHOP_PLUGIN_DIR . 'admin/class-chatshop-admin.php';
+            if (file_exists($admin_path)) {
+                require_once $admin_path;
             }
         }
 
         // Load public class
-        $public_path = CHATSHOP_PLUGIN_DIR . 'public/';
-        if (file_exists($public_path . 'class-chatshop-public.php')) {
-            require_once $public_path . 'class-chatshop-public.php';
+        $public_path = CHATSHOP_PLUGIN_DIR . 'public/class-chatshop-public.php';
+        if (file_exists($public_path)) {
+            require_once $public_path;
         }
     }
 
@@ -179,20 +180,8 @@ final class ChatShop
      */
     private function set_locale()
     {
-        $i18n_path = CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-i18n.php';
-        if (file_exists($i18n_path)) {
-            if (!class_exists('\ChatShop\ChatShop_i18n')) {
-                require_once $i18n_path;
-            }
-            if (class_exists('\ChatShop\ChatShop_i18n')) {
-                $plugin_i18n = new ChatShop_i18n();
-                $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
-            }
-        } else {
-            // Fallback to built-in i18n class
-            $plugin_i18n = new ChatShop_i18n();
-            $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
-        }
+        $plugin_i18n = new ChatShop_i18n();
+        $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
     }
 
     /**
@@ -212,30 +201,21 @@ final class ChatShop
      */
     public function check_dependencies()
     {
-        $activator_path = CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-activator.php';
-        if (file_exists($activator_path)) {
-            if (!class_exists('\ChatShop\ChatShop_Activator')) {
-                require_once $activator_path;
-            }
+        $errors = ChatShop_Activator::get_activation_errors();
 
-            if (class_exists('\ChatShop\ChatShop_Activator')) {
-                $errors = ChatShop_Activator::get_activation_errors();
-
-                if (! empty($errors)) {
-                    add_action('admin_notices', function () use ($errors) {
+        if (!empty($errors)) {
+            add_action('admin_notices', function () use ($errors) {
 ?>
-                        <div class="notice notice-error">
-                            <p><strong><?php esc_html_e('ChatShop Error:', 'chatshop'); ?></strong></p>
-                            <ul>
-                                <?php foreach ($errors as $error) : ?>
-                                    <li><?php echo esc_html($error); ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </div>
+                <div class="notice notice-error">
+                    <p><strong><?php esc_html_e('ChatShop Error:', 'chatshop'); ?></strong></p>
+                    <ul>
+                        <?php foreach ($errors as $error) : ?>
+                            <li><?php echo esc_html($error); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
 <?php
-                    });
-                }
-            }
+            });
         }
     }
 
@@ -246,22 +226,19 @@ final class ChatShop
      */
     private function define_admin_hooks()
     {
-        if (is_admin()) {
-            $admin_path = CHATSHOP_PLUGIN_DIR . 'admin/class-chatshop-admin.php';
-            if (file_exists($admin_path) && class_exists('\ChatShop\ChatShop_Admin')) {
-                $this->admin = new ChatShop_Admin();
+        if (is_admin() && class_exists('\ChatShop\ChatShop_Admin')) {
+            $this->admin = new ChatShop_Admin();
 
-                // Admin initialization
-                $this->loader->add_action('admin_enqueue_scripts', $this->admin, 'enqueue_styles');
-                $this->loader->add_action('admin_enqueue_scripts', $this->admin, 'enqueue_scripts');
+            // Admin initialization
+            $this->loader->add_action('admin_enqueue_scripts', $this->admin, 'enqueue_styles');
+            $this->loader->add_action('admin_enqueue_scripts', $this->admin, 'enqueue_scripts');
 
-                // Admin menu hooks
-                $this->loader->add_action('admin_menu', $this->admin, 'add_admin_menu');
-                $this->loader->add_action('admin_init', $this->admin, 'init_settings');
+            // Admin menu hooks
+            $this->loader->add_action('admin_menu', $this->admin, 'add_admin_menu');
+            $this->loader->add_action('admin_init', $this->admin, 'init_settings');
 
-                // AJAX hooks for admin
-                $this->loader->add_action('wp_ajax_chatshop_admin_action', $this->admin, 'handle_ajax_request');
-            }
+            // AJAX hooks for admin
+            $this->loader->add_action('wp_ajax_chatshop_admin_action', $this->admin, 'handle_ajax_request');
         }
     }
 
@@ -272,8 +249,7 @@ final class ChatShop
      */
     private function define_public_hooks()
     {
-        $public_path = CHATSHOP_PLUGIN_DIR . 'public/class-chatshop-public.php';
-        if (file_exists($public_path) && class_exists('\ChatShop\ChatShop_Public')) {
+        if (class_exists('\ChatShop\ChatShop_Public')) {
             $this->public = new ChatShop_Public();
 
             // Public scripts and styles
@@ -286,6 +262,9 @@ final class ChatShop
             // Public AJAX hooks (for non-logged in users)
             $this->loader->add_action('wp_ajax_nopriv_chatshop_public_action', $this->public, 'handle_ajax_request');
             $this->loader->add_action('wp_ajax_chatshop_public_action', $this->public, 'handle_ajax_request');
+
+            // Add floating WhatsApp button
+            $this->loader->add_action('wp_footer', $this->public, 'add_floating_whatsapp_button');
         }
     }
 
@@ -339,26 +318,9 @@ final class ChatShop
      */
     private function init_components()
     {
-        // Load component loader and registry
-        $includes_path = CHATSHOP_PLUGIN_DIR . 'includes/';
-
-        // First check if component registry exists
-        if (file_exists($includes_path . 'class-chatshop-component-registry.php')) {
-            require_once $includes_path . 'class-chatshop-component-registry.php';
-        }
-
-        // Then load component loader if both files exist
-        if (
-            file_exists($includes_path . 'class-chatshop-component-loader.php') &&
-            class_exists('\ChatShop\ChatShop_Component_Registry')
-        ) {
-            require_once $includes_path . 'class-chatshop-component-loader.php';
-
-            if (class_exists('\ChatShop\ChatShop_Component_Loader')) {
-                $component_loader = new ChatShop_Component_Loader();
-                $component_loader->load_components();
-            }
-        }
+        // Initialize component loader
+        $this->component_loader = new ChatShop_Component_Loader();
+        $this->component_loader->load_components();
 
         // Hook for manual component loading if automatic loading fails
         do_action('chatshop_load_components');
@@ -406,128 +368,16 @@ final class ChatShop
     {
         return $this->public;
     }
-}
-
-/**
- * ChatShop Loader Class
- *
- * Manages all hooks and filters for the plugin
- *
- * @since 1.0.0
- */
-class ChatShop_Loader
-{
 
     /**
-     * The array of actions registered with WordPress
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    protected $actions = array();
-
-    /**
-     * The array of filters registered with WordPress
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    protected $filters = array();
-
-    /**
-     * Add a new action to the collection
+     * Get the component loader
      *
      * @since 1.0.0
-     * @param string $hook          The name of the WordPress action
-     * @param object $component     A reference to the instance of the object on which the action is defined
-     * @param string $callback      The name of the function definition on the $component
-     * @param int    $priority      Optional. The priority at which the function should be fired
-     * @param int    $accepted_args Optional. The number of arguments that should be passed to the $callback
+     * @return ChatShop_Component_Loader|null
      */
-    public function add_action($hook, $component, $callback, $priority = 10, $accepted_args = 1)
+    public function get_component_loader()
     {
-        $this->actions = $this->add($this->actions, $hook, $component, $callback, $priority, $accepted_args);
-    }
-
-    /**
-     * Add a new filter to the collection
-     *
-     * @since 1.0.0
-     * @param string $hook          The name of the WordPress filter
-     * @param object $component     A reference to the instance of the object on which the filter is defined
-     * @param string $callback      The name of the function definition on the $component
-     * @param int    $priority      Optional. The priority at which the function should be fired
-     * @param int    $accepted_args Optional. The number of arguments that should be passed to the $callback
-     */
-    public function add_filter($hook, $component, $callback, $priority = 10, $accepted_args = 1)
-    {
-        $this->filters = $this->add($this->filters, $hook, $component, $callback, $priority, $accepted_args);
-    }
-
-    /**
-     * Add hook to the collection
-     *
-     * @since 1.0.0
-     * @param array  $hooks         The collection of hooks (actions or filters)
-     * @param string $hook          The name of the WordPress hook
-     * @param object $component     A reference to the instance of the object on which the hook is defined
-     * @param string $callback      The name of the function definition on the $component
-     * @param int    $priority      The priority at which the function should be fired
-     * @param int    $accepted_args The number of arguments that should be passed to the $callback
-     * @return array The collection of hooks
-     */
-    private function add($hooks, $hook, $component, $callback, $priority, $accepted_args)
-    {
-        $hooks[] = array(
-            'hook'          => $hook,
-            'component'     => $component,
-            'callback'      => $callback,
-            'priority'      => $priority,
-            'accepted_args' => $accepted_args,
-        );
-
-        return $hooks;
-    }
-
-    /**
-     * Register the filters and actions with WordPress
-     *
-     * @since 1.0.0
-     */
-    public function run()
-    {
-        foreach ($this->filters as $hook) {
-            add_filter($hook['hook'], array($hook['component'], $hook['callback']), $hook['priority'], $hook['accepted_args']);
-        }
-
-        foreach ($this->actions as $hook) {
-            add_action($hook['hook'], array($hook['component'], $hook['callback']), $hook['priority'], $hook['accepted_args']);
-        }
-    }
-}
-
-/**
- * ChatShop i18n Class
- *
- * Handles internationalization functionality
- *
- * @since 1.0.0
- */
-class ChatShop_i18n
-{
-
-    /**
-     * Load the plugin text domain for translation
-     *
-     * @since 1.0.0
-     */
-    public function load_plugin_textdomain()
-    {
-        load_plugin_textdomain(
-            'chatshop',
-            false,
-            dirname(CHATSHOP_PLUGIN_BASENAME) . '/languages/'
-        );
+        return $this->component_loader;
     }
 }
 
@@ -538,13 +388,7 @@ class ChatShop_i18n
  */
 function chatshop_activate()
 {
-    $activator_path = CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-activator.php';
-    if (file_exists($activator_path)) {
-        require_once $activator_path;
-        if (class_exists('\ChatShop\ChatShop_Activator')) {
-            ChatShop_Activator::activate();
-        }
-    }
+    ChatShop_Activator::activate();
 
     // Hook for extensions
     do_action('chatshop_activated');
@@ -557,26 +401,36 @@ function chatshop_activate()
  */
 function chatshop_deactivate()
 {
-    $deactivator_path = CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-deactivator.php';
-    if (file_exists($deactivator_path)) {
-        require_once $deactivator_path;
-        if (class_exists('\ChatShop\ChatShop_Deactivator')) {
-            ChatShop_Deactivator::deactivate();
-        }
-    }
+    ChatShop_Deactivator::deactivate();
 
     // Hook for extensions
     do_action('chatshop_deactivated');
 }
 
-// Register activation hook
-register_activation_hook(__FILE__, __NAMESPACE__ . '\chatshop_activate');
-
-// Register deactivation hook
-register_deactivation_hook(__FILE__, __NAMESPACE__ . '\chatshop_deactivate');
+// Register activation and deactivation hooks
+register_activation_hook(__FILE__, '\ChatShop\chatshop_activate');
+register_deactivation_hook(__FILE__, '\ChatShop\chatshop_deactivate');
 
 /**
- * Initialize the plugin
+ * Begin execution of the plugin
+ *
+ * Since everything within the plugin is registered via hooks,
+ * then kicking off the plugin from this point in the file does
+ * not affect the page life cycle.
+ *
+ * @since 1.0.0
+ */
+function chatshop_run()
+{
+    $plugin = ChatShop::instance();
+    $plugin->run();
+}
+
+// Run the plugin
+chatshop_run();
+
+/**
+ * Helper function to get the main plugin instance
  *
  * @since 1.0.0
  * @return ChatShop
@@ -586,8 +440,95 @@ function chatshop()
     return ChatShop::instance();
 }
 
-// Initialize and run the plugin
-add_action('plugins_loaded', function () {
-    $chatshop = chatshop();
-    $chatshop->run();
-}, 0);
+/**
+ * Helper function for logging
+ *
+ * @since 1.0.0
+ * @param string $message Log message
+ * @param string $level   Log level (error, warning, info, debug)
+ */
+function chatshop_log($message, $level = 'info')
+{
+    if (!defined('WP_DEBUG') || !WP_DEBUG) {
+        return;
+    }
+
+    $general_options = get_option('chatshop_general_options', array());
+    $log_level = isset($general_options['log_level']) ? $general_options['log_level'] : 'error';
+
+    $levels = array('error' => 1, 'warning' => 2, 'info' => 3, 'debug' => 4);
+    $current_level = isset($levels[$log_level]) ? $levels[$log_level] : 1;
+    $message_level = isset($levels[$level]) ? $levels[$level] : 1;
+
+    if ($message_level <= $current_level) {
+        error_log("[ChatShop] [{$level}] {$message}");
+    }
+}
+
+/**
+ * Helper function to check if plugin is enabled
+ *
+ * @since 1.0.0
+ * @return bool
+ */
+function chatshop_is_enabled()
+{
+    $general_options = get_option('chatshop_general_options', array());
+    return isset($general_options['plugin_enabled']) ? (bool) $general_options['plugin_enabled'] : true;
+}
+
+/**
+ * Helper function to get plugin option
+ *
+ * @since 1.0.0
+ * @param string $option_group Option group name
+ * @param string $option_name  Option name
+ * @param mixed  $default      Default value
+ * @return mixed
+ */
+function chatshop_get_option($option_group, $option_name = '', $default = null)
+{
+    $options = get_option("chatshop_{$option_group}_options", array());
+
+    if (empty($option_name)) {
+        return $options;
+    }
+
+    return isset($options[$option_name]) ? $options[$option_name] : $default;
+}
+
+/**
+ * Helper function to update plugin option
+ *
+ * @since 1.0.0
+ * @param string $option_group Option group name
+ * @param string $option_name  Option name
+ * @param mixed  $value        Option value
+ * @return bool
+ */
+function chatshop_update_option($option_group, $option_name, $value)
+{
+    $options = get_option("chatshop_{$option_group}_options", array());
+    $options[$option_name] = $value;
+
+    return update_option("chatshop_{$option_group}_options", $options);
+}
+
+/**
+ * Helper function to get component instance
+ *
+ * @since 1.0.0
+ * @param string $component_id Component identifier
+ * @return object|null
+ */
+function chatshop_get_component($component_id)
+{
+    $plugin = ChatShop::instance();
+    $component_loader = $plugin->get_component_loader();
+
+    if ($component_loader) {
+        return $component_loader->get_component_instance($component_id);
+    }
+
+    return null;
+}

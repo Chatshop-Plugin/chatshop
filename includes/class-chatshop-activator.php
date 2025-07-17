@@ -3,66 +3,348 @@
 /**
  * Fired during plugin activation
  *
- * This class defines all code necessary to run during the plugin's activation.
- *
  * @package ChatShop
- * @since   1.0.0
+ * @subpackage ChatShop/includes
+ * @since 1.0.0
  */
 
 namespace ChatShop;
 
-// Exit if accessed directly.
+// Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
 }
 
 /**
- * ChatShop Activator Class
+ * Fired during plugin activation
  *
- * Handles plugin activation tasks including database table creation and initial setup.
+ * This class defines all code necessary to run during the plugin's activation.
  *
  * @since 1.0.0
  */
 class ChatShop_Activator
 {
     /**
-     * Plugin activation method
+     * Activation errors
      *
-     * Runs when the plugin is activated.
+     * @since 1.0.0
+     * @var array
+     */
+    private static $activation_errors = array();
+
+    /**
+     * Activate the plugin
      *
      * @since 1.0.0
      */
     public static function activate()
     {
+        // Check system requirements
         self::check_requirements();
-        self::create_tables();
-        self::insert_default_settings();
-        self::set_activation_flag();
-        self::schedule_events();
+
+        // If there are errors, don't proceed
+        if (!empty(self::$activation_errors)) {
+            return;
+        }
+
+        // Create database tables
+        self::create_database_tables();
+
+        // Set default options
+        self::set_default_options();
+
+        // Create necessary directories
+        self::create_directories();
+
+        // Schedule cron events
+        self::schedule_cron_events();
+
+        // Set activation flag
+        update_option('chatshop_activated', true);
+        update_option('chatshop_activation_time', current_time('timestamp'));
 
         // Flush rewrite rules
         flush_rewrite_rules();
 
         // Hook for extensions
-        do_action('chatshop_activated');
+        do_action('chatshop_plugin_activated');
     }
 
     /**
-     * Check plugin requirements
+     * Check system requirements
      *
      * @since 1.0.0
-     * @throws \Exception If requirements are not met
      */
     private static function check_requirements()
     {
-        $errors = self::get_activation_errors();
-
-        if (!empty($errors)) {
-            wp_die(
-                implode('<br>', array_map('esc_html', $errors)),
-                esc_html__('ChatShop Activation Error', 'chatshop'),
-                array('back_link' => true)
+        // Check PHP version
+        if (version_compare(PHP_VERSION, '7.4', '<')) {
+            self::$activation_errors[] = sprintf(
+                __('ChatShop requires PHP version 7.4 or higher. You are running version %s.', 'chatshop'),
+                PHP_VERSION
             );
+        }
+
+        // Check WordPress version
+        global $wp_version;
+        if (version_compare($wp_version, '6.3', '<')) {
+            self::$activation_errors[] = sprintf(
+                __('ChatShop requires WordPress version 6.3 or higher. You are running version %s.', 'chatshop'),
+                $wp_version
+            );
+        }
+
+        // Check for WooCommerce
+        if (!class_exists('WooCommerce')) {
+            self::$activation_errors[] = __('ChatShop requires WooCommerce to be installed and activated.', 'chatshop');
+        }
+
+        // Check required PHP extensions
+        $required_extensions = array('curl', 'json', 'mbstring');
+        foreach ($required_extensions as $extension) {
+            if (!extension_loaded($extension)) {
+                self::$activation_errors[] = sprintf(
+                    __('ChatShop requires the %s PHP extension.', 'chatshop'),
+                    $extension
+                );
+            }
+        }
+
+        // Check database capabilities
+        global $wpdb;
+        $required_tables = array('posts', 'postmeta', 'options', 'users', 'usermeta');
+        foreach ($required_tables as $table) {
+            $table_name = $wpdb->prefix . $table;
+            if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") !== $table_name) {
+                self::$activation_errors[] = sprintf(
+                    __('Required database table %s is missing.', 'chatshop'),
+                    $table_name
+                );
+            }
+        }
+
+        // Check file permissions
+        $upload_dir = wp_upload_dir();
+        if (!wp_is_writable($upload_dir['basedir'])) {
+            self::$activation_errors[] = __('The uploads directory is not writable. Please check file permissions.', 'chatshop');
+        }
+    }
+
+    /**
+     * Create database tables
+     *
+     * @since 1.0.0
+     */
+    private static function create_database_tables()
+    {
+        global $wpdb;
+
+        $charset_collate = $wpdb->get_charset_collate();
+
+        // WhatsApp contacts table
+        $table_name = $wpdb->prefix . 'chatshop_whatsapp_contacts';
+        $sql = "CREATE TABLE $table_name (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            phone_number varchar(20) NOT NULL,
+            display_name varchar(255) DEFAULT '',
+            first_name varchar(100) DEFAULT '',
+            last_name varchar(100) DEFAULT '',
+            email varchar(100) DEFAULT '',
+            tags text,
+            status varchar(20) DEFAULT 'active',
+            last_interaction datetime DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY phone_number (phone_number),
+            KEY status (status),
+            KEY last_interaction (last_interaction)
+        ) $charset_collate;";
+
+        // WhatsApp messages table
+        $table_name = $wpdb->prefix . 'chatshop_whatsapp_messages';
+        $sql .= "CREATE TABLE $table_name (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            contact_id bigint(20) NOT NULL,
+            message_id varchar(255) NOT NULL,
+            direction enum('inbound','outbound') NOT NULL,
+            message_type varchar(20) DEFAULT 'text',
+            content text,
+            media_url varchar(500) DEFAULT '',
+            status varchar(20) DEFAULT 'sent',
+            timestamp datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY message_id (message_id),
+            KEY contact_id (contact_id),
+            KEY direction (direction),
+            KEY status (status),
+            KEY timestamp (timestamp)
+        ) $charset_collate;";
+
+        // Payment links table
+        $table_name = $wpdb->prefix . 'chatshop_payment_links';
+        $sql .= "CREATE TABLE $table_name (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            link_id varchar(50) NOT NULL,
+            contact_id bigint(20) DEFAULT NULL,
+            order_id bigint(20) DEFAULT NULL,
+            amount decimal(10,2) NOT NULL,
+            currency varchar(3) DEFAULT 'NGN',
+            description text,
+            status varchar(20) DEFAULT 'pending',
+            gateway varchar(20) DEFAULT 'paystack',
+            gateway_reference varchar(255) DEFAULT '',
+            expires_at datetime DEFAULT NULL,
+            paid_at datetime DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY link_id (link_id),
+            KEY contact_id (contact_id),
+            KEY order_id (order_id),
+            KEY status (status),
+            KEY gateway (gateway),
+            KEY expires_at (expires_at)
+        ) $charset_collate;";
+
+        // Campaigns table
+        $table_name = $wpdb->prefix . 'chatshop_campaigns';
+        $sql .= "CREATE TABLE $table_name (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            name varchar(255) NOT NULL,
+            description text,
+            message_template text NOT NULL,
+            target_audience text,
+            status varchar(20) DEFAULT 'draft',
+            scheduled_at datetime DEFAULT NULL,
+            sent_at datetime DEFAULT NULL,
+            total_recipients int(11) DEFAULT 0,
+            total_sent int(11) DEFAULT 0,
+            total_delivered int(11) DEFAULT 0,
+            total_read int(11) DEFAULT 0,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY status (status),
+            KEY scheduled_at (scheduled_at)
+        ) $charset_collate;";
+
+        // Analytics table
+        $table_name = $wpdb->prefix . 'chatshop_analytics';
+        $sql .= "CREATE TABLE $table_name (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            metric_name varchar(100) NOT NULL,
+            metric_value decimal(15,4) DEFAULT 0,
+            metric_date date NOT NULL,
+            meta_data text,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY metric_date_name (metric_date, metric_name),
+            KEY metric_name (metric_name),
+            KEY metric_date (metric_date)
+        ) $charset_collate;";
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+
+        // Update database version
+        update_option('chatshop_db_version', '1.0.0');
+    }
+
+    /**
+     * Set default options
+     *
+     * @since 1.0.0
+     */
+    private static function set_default_options()
+    {
+        // General options
+        $general_defaults = array(
+            'plugin_enabled' => true,
+            'debug_mode'     => false,
+            'log_level'      => 'error'
+        );
+        add_option('chatshop_general_options', $general_defaults);
+
+        // WhatsApp options
+        $whatsapp_defaults = array(
+            'api_token'     => '',
+            'phone_number'  => '',
+            'webhook_url'   => '',
+            'auto_reply'    => false
+        );
+        add_option('chatshop_whatsapp_options', $whatsapp_defaults);
+
+        // Payment options
+        $payment_defaults = array(
+            'default_gateway'      => 'paystack',
+            'paystack_secret_key'  => '',
+            'paystack_public_key'  => '',
+            'test_mode'            => true,
+            'currency'             => 'NGN'
+        );
+        add_option('chatshop_payments_options', $payment_defaults);
+
+        // Analytics options
+        $analytics_defaults = array(
+            'enable_tracking' => true,
+            'retention_days'  => 365
+        );
+        add_option('chatshop_analytics_options', $analytics_defaults);
+    }
+
+    /**
+     * Create necessary directories
+     *
+     * @since 1.0.0
+     */
+    private static function create_directories()
+    {
+        $upload_dir = wp_upload_dir();
+        $chatshop_dir = $upload_dir['basedir'] . '/chatshop';
+
+        $directories = array(
+            $chatshop_dir,
+            $chatshop_dir . '/logs',
+            $chatshop_dir . '/exports',
+            $chatshop_dir . '/temp'
+        );
+
+        foreach ($directories as $dir) {
+            if (!file_exists($dir)) {
+                wp_mkdir_p($dir);
+
+                // Create .htaccess for security
+                $htaccess_content = "Order deny,allow\nDeny from all\n";
+                file_put_contents($dir . '/.htaccess', $htaccess_content);
+
+                // Create index.php for security
+                $index_content = "<?php\n// Silence is golden.\n";
+                file_put_contents($dir . '/index.php', $index_content);
+            }
+        }
+    }
+
+    /**
+     * Schedule cron events
+     *
+     * @since 1.0.0
+     */
+    private static function schedule_cron_events()
+    {
+        // Schedule daily cleanup
+        if (!wp_next_scheduled('chatshop_daily_cleanup')) {
+            wp_schedule_event(time(), 'daily', 'chatshop_daily_cleanup');
+        }
+
+        // Schedule analytics aggregation
+        if (!wp_next_scheduled('chatshop_analytics_aggregation')) {
+            wp_schedule_event(time(), 'hourly', 'chatshop_analytics_aggregation');
+        }
+
+        // Schedule campaign processing
+        if (!wp_next_scheduled('chatshop_process_campaigns')) {
+            wp_schedule_event(time(), 'chatshop_five_minutes', 'chatshop_process_campaigns');
         }
     }
 
@@ -74,288 +356,17 @@ class ChatShop_Activator
      */
     public static function get_activation_errors()
     {
-        $errors = array();
-
-        // Check PHP version
-        if (version_compare(PHP_VERSION, '7.4', '<')) {
-            $errors[] = sprintf(
-                __('ChatShop requires PHP 7.4 or higher. Your current version is %s.', 'chatshop'),
-                PHP_VERSION
-            );
-        }
-
-        // Check WordPress version
-        if (version_compare($GLOBALS['wp_version'], '5.0', '<')) {
-            $errors[] = sprintf(
-                __('ChatShop requires WordPress 5.0 or higher. Your current version is %s.', 'chatshop'),
-                $GLOBALS['wp_version']
-            );
-        }
-
-        // Check if WooCommerce is active
-        if (!class_exists('WooCommerce')) {
-            $errors[] = __('ChatShop requires WooCommerce to be installed and activated.', 'chatshop');
-        }
-
-        // Check database requirements
-        global $wpdb;
-        $charset_collate = $wpdb->get_charset_collate();
-        if (empty($charset_collate)) {
-            $errors[] = __('Database charset configuration is required for ChatShop.', 'chatshop');
-        }
-
-        return $errors;
+        return self::$activation_errors;
     }
 
     /**
-     * Create database tables
+     * Check if plugin was properly activated
      *
      * @since 1.0.0
-     */
-    private static function create_tables()
-    {
-        global $wpdb;
-
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-
-        // Create settings table
-        $settings_table = $wpdb->prefix . 'chatshop_settings';
-
-        $settings_sql = "CREATE TABLE $settings_table (
-            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-            option_name varchar(191) NOT NULL,
-            option_value longtext,
-            is_premium tinyint(1) NOT NULL DEFAULT 0,
-            created_at datetime DEFAULT CURRENT_TIMESTAMP,
-            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY option_name (option_name),
-            KEY is_premium (is_premium),
-            KEY created_at (created_at)
-        ) " . $wpdb->get_charset_collate() . ";";
-
-        dbDelta($settings_sql);
-
-        // Verify table creation
-        if ($wpdb->get_var("SHOW TABLES LIKE '$settings_table'") !== $settings_table) {
-            error_log('ChatShop: Failed to create settings table');
-        }
-    }
-
-    /**
-     * Insert default settings
-     *
-     * @since 1.0.0
-     */
-    private static function insert_default_settings()
-    {
-        global $wpdb;
-
-        $settings_table = $wpdb->prefix . 'chatshop_settings';
-
-        // Default free settings
-        $default_settings = array(
-            array(
-                'option_name' => 'plugin_version',
-                'option_value' => CHATSHOP_VERSION,
-                'is_premium' => 0
-            ),
-            array(
-                'option_name' => 'activation_date',
-                'option_value' => current_time('mysql'),
-                'is_premium' => 0
-            ),
-            array(
-                'option_name' => 'whatsapp_enabled',
-                'option_value' => '1',
-                'is_premium' => 0
-            ),
-            array(
-                'option_name' => 'payment_enabled',
-                'option_value' => '1',
-                'is_premium' => 0
-            ),
-            array(
-                'option_name' => 'analytics_enabled',
-                'option_value' => '1',
-                'is_premium' => 0
-            ),
-            array(
-                'option_name' => 'license_key',
-                'option_value' => '',
-                'is_premium' => 1
-            ),
-            array(
-                'option_name' => 'bulk_messaging_enabled',
-                'option_value' => '0',
-                'is_premium' => 1
-            ),
-            array(
-                'option_name' => 'advanced_analytics_enabled',
-                'option_value' => '0',
-                'is_premium' => 1
-            ),
-            array(
-                'option_name' => 'white_label_enabled',
-                'option_value' => '0',
-                'is_premium' => 1
-            ),
-            array(
-                'option_name' => 'api_access_enabled',
-                'option_value' => '0',
-                'is_premium' => 1
-            )
-        );
-
-        foreach ($default_settings as $setting) {
-            $exists = $wpdb->get_var(
-                $wpdb->prepare(
-                    "SELECT id FROM $settings_table WHERE option_name = %s",
-                    $setting['option_name']
-                )
-            );
-
-            if (!$exists) {
-                $wpdb->insert(
-                    $settings_table,
-                    array(
-                        'option_name' => sanitize_key($setting['option_name']),
-                        'option_value' => sanitize_text_field($setting['option_value']),
-                        'is_premium' => absint($setting['is_premium'])
-                    ),
-                    array('%s', '%s', '%d')
-                );
-            }
-        }
-    }
-
-    /**
-     * Set activation flag
-     *
-     * @since 1.0.0
-     */
-    private static function set_activation_flag()
-    {
-        update_option('chatshop_activation_redirect', true);
-        update_option('chatshop_installed', true);
-    }
-
-    /**
-     * Schedule WordPress events
-     *
-     * @since 1.0.0
-     */
-    private static function schedule_events()
-    {
-        // Schedule license validation check (daily)
-        if (!wp_next_scheduled('chatshop_license_check')) {
-            wp_schedule_event(time(), 'daily', 'chatshop_license_check');
-        }
-
-        // Schedule cleanup task (weekly)
-        if (!wp_next_scheduled('chatshop_cleanup')) {
-            wp_schedule_event(time(), 'weekly', 'chatshop_cleanup');
-        }
-    }
-
-    /**
-     * Get setting value from custom table
-     *
-     * @param string $option_name Setting name
-     * @param mixed  $default     Default value if not found
-     * @return mixed
-     * @since 1.0.0
-     */
-    public static function get_setting($option_name, $default = false)
-    {
-        global $wpdb;
-
-        $settings_table = $wpdb->prefix . 'chatshop_settings';
-
-        $value = $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT option_value FROM $settings_table WHERE option_name = %s",
-                sanitize_key($option_name)
-            )
-        );
-
-        return $value !== null ? maybe_unserialize($value) : $default;
-    }
-
-    /**
-     * Update setting value in custom table
-     *
-     * @param string $option_name  Setting name
-     * @param mixed  $option_value Setting value
-     * @param bool   $is_premium   Whether this is a premium setting
      * @return bool
-     * @since 1.0.0
      */
-    public static function update_setting($option_name, $option_value, $is_premium = false)
+    public static function is_activated()
     {
-        global $wpdb;
-
-        $settings_table = $wpdb->prefix . 'chatshop_settings';
-
-        $serialized_value = maybe_serialize($option_value);
-
-        $result = $wpdb->replace(
-            $settings_table,
-            array(
-                'option_name' => sanitize_key($option_name),
-                'option_value' => $serialized_value,
-                'is_premium' => $is_premium ? 1 : 0
-            ),
-            array('%s', '%s', '%d')
-        );
-
-        return $result !== false;
-    }
-
-    /**
-     * Delete setting from custom table
-     *
-     * @param string $option_name Setting name
-     * @return bool
-     * @since 1.0.0
-     */
-    public static function delete_setting($option_name)
-    {
-        global $wpdb;
-
-        $settings_table = $wpdb->prefix . 'chatshop_settings';
-
-        $result = $wpdb->delete(
-            $settings_table,
-            array('option_name' => sanitize_key($option_name)),
-            array('%s')
-        );
-
-        return $result !== false;
-    }
-
-    /**
-     * Get all premium settings
-     *
-     * @return array
-     * @since 1.0.0
-     */
-    public static function get_premium_settings()
-    {
-        global $wpdb;
-
-        $settings_table = $wpdb->prefix . 'chatshop_settings';
-
-        $results = $wpdb->get_results(
-            "SELECT option_name, option_value FROM $settings_table WHERE is_premium = 1",
-            ARRAY_A
-        );
-
-        $premium_settings = array();
-        foreach ($results as $row) {
-            $premium_settings[$row['option_name']] = maybe_unserialize($row['option_value']);
-        }
-
-        return $premium_settings;
+        return get_option('chatshop_activated', false);
     }
 }

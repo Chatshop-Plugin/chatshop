@@ -3,23 +3,22 @@
 /**
  * Component Registry for ChatShop Plugin
  *
- * Manages registration and metadata for modular components.
- *
  * @package ChatShop
- * @since   1.0.0
+ * @subpackage ChatShop/includes
+ * @since 1.0.0
  */
 
 namespace ChatShop;
 
-// Exit if accessed directly.
+// Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
 }
 
 /**
- * ChatShop Component Registry Class
+ * Component Registry Class
  *
- * Registers components with metadata including name, version, and dependencies.
+ * Manages registration and loading of plugin components
  *
  * @since 1.0.0
  */
@@ -28,259 +27,302 @@ class ChatShop_Component_Registry
     /**
      * Registered components
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
-    private $components = array();
+    private static $components = array();
 
     /**
-     * Required component fields
+     * Loaded components
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
-    private $required_fields = array('name', 'class', 'file', 'version');
+    private static $loaded_components = array();
+
+    /**
+     * Component dependencies
+     *
+     * @since 1.0.0
+     * @var array
+     */
+    private static $dependencies = array();
 
     /**
      * Register a component
      *
-     * @param string $id Component unique identifier
-     * @param array  $metadata Component metadata
-     * @return bool
      * @since 1.0.0
+     * @param string $component_id   Unique component identifier
+     * @param array  $args          Component arguments
      */
-    public function register($id, $metadata)
+    public static function register_component($component_id, $args = array())
     {
-        if (empty($id) || !is_string($id)) {
-            return false;
-        }
-
-        if (!$this->validate_metadata($metadata)) {
-            return false;
-        }
-
-        $metadata = $this->sanitize_metadata($metadata);
-
-        $this->components[$id] = wp_parse_args($metadata, array(
+        $defaults = array(
+            'name'         => '',
+            'description'  => '',
+            'version'      => '1.0.0',
+            'file'         => '',
+            'class'        => '',
             'dependencies' => array(),
-            'description' => '',
-            'author' => '',
-            'priority' => 10,
-        ));
+            'enabled'      => true,
+            'priority'     => 10
+        );
 
-        do_action('chatshop_component_registered', $id, $this->components[$id]);
+        $args = wp_parse_args($args, $defaults);
 
-        return true;
-    }
-
-    /**
-     * Unregister a component
-     *
-     * @param string $id Component ID
-     * @return bool
-     * @since 1.0.0
-     */
-    public function unregister($id)
-    {
-        if (!$this->is_registered($id)) {
+        // Validate required fields
+        if (empty($args['file']) || empty($args['class'])) {
             return false;
         }
 
-        unset($this->components[$id]);
+        self::$components[$component_id] = $args;
 
-        do_action('chatshop_component_unregistered', $id);
+        // Store dependencies
+        if (!empty($args['dependencies'])) {
+            self::$dependencies[$component_id] = $args['dependencies'];
+        }
 
         return true;
-    }
-
-    /**
-     * Check if a component is registered
-     *
-     * @param string $id Component ID
-     * @return bool
-     * @since 1.0.0
-     */
-    public function is_registered($id)
-    {
-        return isset($this->components[$id]);
-    }
-
-    /**
-     * Get a registered component
-     *
-     * @param string $id Component ID
-     * @return array|null
-     * @since 1.0.0
-     */
-    public function get($id)
-    {
-        return $this->is_registered($id) ? $this->components[$id] : null;
     }
 
     /**
      * Get all registered components
      *
+     * @since 1.0.0
      * @return array
-     * @since 1.0.0
      */
-    public function get_all()
+    public static function get_components()
     {
-        return $this->components;
+        return self::$components;
     }
 
     /**
-     * Get components sorted by priority
+     * Get a specific component
      *
-     * @return array
      * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return array|false
      */
-    public function get_sorted()
+    public static function get_component($component_id)
     {
-        $components = $this->components;
-
-        uasort($components, function ($a, $b) {
-            return $a['priority'] - $b['priority'];
-        });
-
-        return $components;
+        return isset(self::$components[$component_id]) ? self::$components[$component_id] : false;
     }
 
     /**
-     * Get component count
+     * Check if component is registered
      *
-     * @return int
      * @since 1.0.0
-     */
-    public function count()
-    {
-        return count($this->components);
-    }
-
-    /**
-     * Get components by dependency
-     *
-     * @param string $dependency Dependency component ID
-     * @return array
-     * @since 1.0.0
-     */
-    public function get_dependents($dependency)
-    {
-        $dependents = array();
-
-        foreach ($this->components as $id => $component) {
-            if (in_array($dependency, $component['dependencies'], true)) {
-                $dependents[$id] = $component;
-            }
-        }
-
-        return $dependents;
-    }
-
-    /**
-     * Check for circular dependencies
-     *
-     * @param string $id Component ID
-     * @param array  $chain Dependency chain
+     * @param string $component_id Component identifier
      * @return bool
-     * @since 1.0.0
      */
-    public function has_circular_dependency($id, $chain = array())
+    public static function is_registered($component_id)
     {
-        if (in_array($id, $chain, true)) {
+        return isset(self::$components[$component_id]);
+    }
+
+    /**
+     * Check if component is loaded
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool
+     */
+    public static function is_loaded($component_id)
+    {
+        return isset(self::$loaded_components[$component_id]);
+    }
+
+    /**
+     * Mark component as loaded
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @param object $instance     Component instance
+     */
+    public static function mark_loaded($component_id, $instance = null)
+    {
+        self::$loaded_components[$component_id] = $instance;
+    }
+
+    /**
+     * Get loaded component instance
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return object|null
+     */
+    public static function get_loaded_component($component_id)
+    {
+        return isset(self::$loaded_components[$component_id]) ? self::$loaded_components[$component_id] : null;
+    }
+
+    /**
+     * Get component dependencies
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return array
+     */
+    public static function get_dependencies($component_id)
+    {
+        return isset(self::$dependencies[$component_id]) ? self::$dependencies[$component_id] : array();
+    }
+
+    /**
+     * Check if component dependencies are met
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool
+     */
+    public static function dependencies_met($component_id)
+    {
+        $dependencies = self::get_dependencies($component_id);
+
+        if (empty($dependencies)) {
             return true;
         }
 
-        $component = $this->get($id);
-        if (!$component || empty($component['dependencies'])) {
-            return false;
-        }
-
-        $chain[] = $id;
-
-        foreach ($component['dependencies'] as $dependency) {
-            if ($this->has_circular_dependency($dependency, $chain)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Validate component metadata
-     *
-     * @param array $metadata Component metadata
-     * @return bool
-     * @since 1.0.0
-     */
-    private function validate_metadata($metadata)
-    {
-        if (!is_array($metadata)) {
-            return false;
-        }
-
-        foreach ($this->required_fields as $field) {
-            if (!isset($metadata[$field]) || empty($metadata[$field])) {
+        foreach ($dependencies as $dependency) {
+            if (!self::is_loaded($dependency)) {
                 return false;
             }
-        }
-
-        // Validate dependencies format
-        if (isset($metadata['dependencies']) && !is_array($metadata['dependencies'])) {
-            return false;
-        }
-
-        // Validate class exists or file path
-        if (!class_exists($metadata['class']) && !file_exists($metadata['file'])) {
-            return false;
         }
 
         return true;
     }
 
     /**
-     * Sanitize component metadata
+     * Get components ordered by priority and dependencies
      *
-     * @param array $metadata Component metadata
-     * @return array
      * @since 1.0.0
+     * @return array
      */
-    private function sanitize_metadata($metadata)
+    public static function get_load_order()
     {
-        $sanitized = array();
+        $components = self::$components;
+        $loaded = array();
+        $order = array();
 
-        $sanitized['name'] = sanitize_text_field($metadata['name']);
-        $sanitized['class'] = sanitize_text_field($metadata['class']);
-        $sanitized['file'] = sanitize_text_field($metadata['file']);
-        $sanitized['version'] = sanitize_text_field($metadata['version']);
+        // Sort by priority first
+        uasort($components, function ($a, $b) {
+            return $a['priority'] - $b['priority'];
+        });
 
-        if (isset($metadata['description'])) {
-            $sanitized['description'] = sanitize_textarea_field($metadata['description']);
+        // Resolve dependencies
+        while (!empty($components)) {
+            $progress = false;
+
+            foreach ($components as $id => $component) {
+                // Skip disabled components
+                if (!$component['enabled']) {
+                    unset($components[$id]);
+                    $progress = true;
+                    continue;
+                }
+
+                // Check if dependencies are loaded
+                $dependencies = self::get_dependencies($id);
+                $can_load = true;
+
+                foreach ($dependencies as $dependency) {
+                    if (!in_array($dependency, $loaded)) {
+                        $can_load = false;
+                        break;
+                    }
+                }
+
+                if ($can_load) {
+                    $order[] = $id;
+                    $loaded[] = $id;
+                    unset($components[$id]);
+                    $progress = true;
+                }
+            }
+
+            // Prevent infinite loop if dependencies can't be resolved
+            if (!$progress) {
+                break;
+            }
         }
 
-        if (isset($metadata['author'])) {
-            $sanitized['author'] = sanitize_text_field($metadata['author']);
-        }
-
-        if (isset($metadata['priority'])) {
-            $sanitized['priority'] = intval($metadata['priority']);
-        }
-
-        if (isset($metadata['dependencies']) && is_array($metadata['dependencies'])) {
-            $sanitized['dependencies'] = array_map('sanitize_text_field', $metadata['dependencies']);
-        }
-
-        return $sanitized;
+        return $order;
     }
 
     /**
-     * Clear all registered components
+     * Enable component
      *
      * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool
      */
-    public function clear()
+    public static function enable_component($component_id)
     {
-        $this->components = array();
-        do_action('chatshop_components_cleared');
+        if (isset(self::$components[$component_id])) {
+            self::$components[$component_id]['enabled'] = true;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Disable component
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool
+     */
+    public static function disable_component($component_id)
+    {
+        if (isset(self::$components[$component_id])) {
+            self::$components[$component_id]['enabled'] = false;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Unregister component
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool
+     */
+    public static function unregister_component($component_id)
+    {
+        if (isset(self::$components[$component_id])) {
+            unset(self::$components[$component_id]);
+            unset(self::$loaded_components[$component_id]);
+            unset(self::$dependencies[$component_id]);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get component status
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return array
+     */
+    public static function get_component_status($component_id)
+    {
+        if (!self::is_registered($component_id)) {
+            return array(
+                'registered' => false,
+                'loaded'     => false,
+                'enabled'    => false
+            );
+        }
+
+        $component = self::get_component($component_id);
+
+        return array(
+            'registered' => true,
+            'loaded'     => self::is_loaded($component_id),
+            'enabled'    => $component['enabled'],
+            'dependencies_met' => self::dependencies_met($component_id)
+        );
     }
 }
