@@ -1,0 +1,163 @@
+/**
+ * Admin styles for ChatShop
+ *
+ * @since      1.0.0
+ * @package    ChatShop
+ * @subpackage ChatShop/admin/css
+ */
+
+/* Dashboard Styles */
+.chatshop-dashboard {
+    margin-top: 20px;
+}
+
+.chatshop-welcome-panel {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    padding: 23px;
+    margin-bottom: 20px;
+}
+
+.chatshop-welcome-panel h2 {
+    margin: 0 0 10px;
+    font-size: 21px;
+    font-weight: 400;
+    line-height: 1.2;
+}
+
+.chatshop-quick-actions {
+    margin-top: 20px;
+}
+
+.chatshop-quick-actions .button {
+    margin-right: 10px;
+}
+
+/* Stats Grid */
+.chatshop-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.chatshop-stat-box {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    padding: 20px;
+    text-align: center;
+}
+
+.chatshop-stat-box h3 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #23282d;
+}
+
+.chatshop-stat-number {
+    font-size: 32px;
+    font-weight: 400;
+    line-height: 1.3;
+    margin: 0 0 5px;
+    color: #2271b1;
+}
+
+.chatshop-stat-label {
+    color: #646970;
+    font-size: 13px;
+    margin: 0;
+}
+
+/* Setup Status */
+.chatshop-setup-status {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.chatshop-setup-status h2 {
+    margin-top: 0;
+}
+
+.chatshop-setup-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.chatshop-setup-list li {
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.chatshop-setup-list li:last-child {
+    border-bottom: none;
+}
+
+.chatshop-setup-list .dashicons {
+    margin-right: 10px;
+    vertical-align: middle;
+}
+
+.chatshop-setup-list .completed .dashicons-yes {
+    color: #46b450;
+}
+
+.chatshop-setup-list .pending .dashicons-no {
+    color: #d63638;
+}
+
+.chatshop-setup-list a {
+    float: right;
+}
+
+/* Recent Activity */
+.chatshop-recent-activity {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    box-shadow: 0 1px 1px rgba(0,0,0,.04);
+    padding: 20px;
+}
+
+.chatshop-recent-activity h2 {
+    margin-top: 0;
+}
+
+/* Settings Page */
+.chatshop-settings-tabs {
+    margin-bottom: 20px;
+}
+
+.nav-tab-wrapper {
+    border-bottom: 1px solid #c3c4c7;
+}
+
+/* Responsive */
+@media screen and (max-width: 782px) {
+    .chatshop-stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .chatshop-quick-actions .button {
+        display: block;
+        width: 100%;
+        margin-bottom: 10px;
+    }
+}
+
+/* Premium Badge */
+.chatshop-premium-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #93003c;
+    color: #fff;
+    font-size: 11px;
+    border-radius: 3px;
+    margin-left: 5px;
+    vertical-align: middle;
+}
