@@ -3,75 +3,74 @@
 /**
  * Fired during plugin deactivation
  *
- * @package    ChatShop
+ * @package ChatShop
  * @subpackage ChatShop/includes
- * @since      1.0.0
+ * @since 1.0.0
  */
 
 namespace ChatShop;
 
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
+}
+
 /**
- * Fired during plugin deactivation.
+ * Fired during plugin deactivation
  *
  * This class defines all code necessary to run during the plugin's deactivation.
  *
- * @since      1.0.0
- * @package    ChatShop
- * @subpackage ChatShop/includes
- * @author     Plugin Developer
+ * @since 1.0.0
  */
 class ChatShop_Deactivator
 {
-
     /**
-     * Deactivate the plugin.
-     *
-     * Cleans up temporary data, transients, and scheduled events.
-     * Preserves user data and settings for potential reactivation.
+     * Deactivate the plugin
      *
      * @since 1.0.0
      */
     public static function deactivate()
     {
+        // Clear scheduled cron events
         self::clear_scheduled_events();
+
+        // Clear transients
         self::clear_transients();
-        self::clear_cache();
-        self::remove_capabilities();
 
         // Flush rewrite rules
         flush_rewrite_rules();
 
-        // Log deactivation
-        self::log_deactivation();
+        // Update deactivation flag
+        update_option('chatshop_activated', false);
+        update_option('chatshop_deactivation_time', current_time('timestamp'));
+
+        // Hook for extensions
+        do_action('chatshop_plugin_deactivated');
     }
 
     /**
-     * Clear all scheduled events.
+     * Clear scheduled cron events
      *
      * @since 1.0.0
      */
     private static function clear_scheduled_events()
     {
-        // Clear any scheduled hooks
-        $hooks = array(
+        $cron_events = array(
             'chatshop_daily_cleanup',
-            'chatshop_process_queue',
-            'chatshop_sync_data',
-            'chatshop_send_notifications',
+            'chatshop_analytics_aggregation',
+            'chatshop_process_campaigns'
         );
 
-        foreach ($hooks as $hook) {
-            $timestamp = wp_next_scheduled($hook);
+        foreach ($cron_events as $event) {
+            $timestamp = wp_next_scheduled($event);
             if ($timestamp) {
-                wp_unschedule_event($timestamp, $hook);
+                wp_unschedule_event($timestamp, $event);
             }
-            // Clear all occurrences
-            wp_clear_scheduled_hook($hook);
         }
     }
 
     /**
-     * Clear plugin transients.
+     * Clear plugin transients
      *
      * @since 1.0.0
      */
@@ -79,72 +78,31 @@ class ChatShop_Deactivator
     {
         global $wpdb;
 
-        // Delete plugin-specific transients
+        // Delete all transients with chatshop prefix
         $wpdb->query(
             "DELETE FROM {$wpdb->options} 
-			WHERE option_name LIKE '_transient_chatshop_%' 
-			OR option_name LIKE '_transient_timeout_chatshop_%'"
+             WHERE option_name LIKE '_transient_chatshop_%' 
+             OR option_name LIKE '_transient_timeout_chatshop_%'"
         );
-
-        // Delete specific transients
-        delete_transient('chatshop_activated');
-        delete_transient('chatshop_admin_notice');
-        delete_transient('chatshop_api_cache');
     }
 
     /**
-     * Clear plugin cache.
+     * Cleanup temporary files
      *
      * @since 1.0.0
      */
-    private static function clear_cache()
+    private static function cleanup_temp_files()
     {
-        // Clear any object cache
-        wp_cache_delete_group('chatshop');
+        $upload_dir = wp_upload_dir();
+        $temp_dir = $upload_dir['basedir'] . '/chatshop/temp';
 
-        // Clear plugin-specific cache options
-        delete_option('chatshop_cache_version');
-        delete_option('chatshop_last_sync');
-    }
-
-    /**
-     * Remove plugin capabilities.
-     *
-     * @since 1.0.0
-     */
-    private static function remove_capabilities()
-    {
-        $capabilities = array(
-            'manage_chatshop',
-            'manage_chatshop_settings',
-            'manage_chatshop_campaigns',
-            'manage_chatshop_payments',
-            'view_chatshop_reports',
-        );
-
-        // Remove from all roles
-        foreach (wp_roles()->roles as $role_name => $role_info) {
-            $role = get_role($role_name);
-            if ($role) {
-                foreach ($capabilities as $cap) {
-                    $role->remove_cap($cap);
+        if (is_dir($temp_dir)) {
+            $files = glob($temp_dir . '/*');
+            foreach ($files as $file) {
+                if (is_file($file)) {
+                    unlink($file);
                 }
             }
-        }
-    }
-
-    /**
-     * Log deactivation for debugging.
-     *
-     * @since 1.0.0
-     */
-    private static function log_deactivation()
-    {
-        if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log(sprintf(
-                'ChatShop deactivated at %s',
-                current_time('mysql')
-            ));
         }
     }
 }
