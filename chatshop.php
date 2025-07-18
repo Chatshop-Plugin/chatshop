@@ -442,6 +442,10 @@ function chatshop()
 
 /**
  * Helper function for logging
+ * 
+ * IMPORTANT: This function is declared once here in the main plugin file
+ * to prevent redeclaration errors. Other files should use this function
+ * by calling \ChatShop\chatshop_log() directly.
  *
  * @since 1.0.0
  * @param string $message Log message
