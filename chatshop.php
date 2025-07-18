@@ -42,6 +42,25 @@ require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-component-registry.p
 require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-component-loader.php';
 
 /**
+ * Load abstract classes
+ */
+require_once CHATSHOP_PLUGIN_DIR . 'includes/abstracts/abstract-chatshop-payment-gateway.php';
+
+/**
+ * Load payment component classes - Check if files exist before requiring
+ */
+$payment_factory_path = CHATSHOP_PLUGIN_DIR . 'components/payment/class-chatshop-payment-factory.php';
+$payment_manager_path = CHATSHOP_PLUGIN_DIR . 'components/payment/class-chatshop-payment-manager.php';
+
+if (file_exists($payment_factory_path)) {
+    require_once $payment_factory_path;
+}
+
+if (file_exists($payment_manager_path)) {
+    require_once $payment_manager_path;
+}
+
+/**
  * Main ChatShop class
  *
  * @since 1.0.0
@@ -89,6 +108,14 @@ final class ChatShop
     private $component_loader;
 
     /**
+     * Payment manager instance
+     *
+     * @var ChatShop_Payment_Manager
+     * @since 1.0.0
+     */
+    private $payment_manager;
+
+    /**
      * Main ChatShop Instance
      *
      * Ensures only one instance of ChatShop is loaded or can be loaded.
@@ -116,6 +143,7 @@ final class ChatShop
         $this->init_loader();
         $this->set_locale();
         $this->check_requirements();
+        $this->init_payment_system();
         $this->define_admin_hooks();
         $this->define_public_hooks();
         $this->init_hooks();
@@ -160,6 +188,74 @@ final class ChatShop
         $public_path = CHATSHOP_PLUGIN_DIR . 'public/class-chatshop-public.php';
         if (file_exists($public_path)) {
             require_once $public_path;
+        }
+
+        // Load payment gateway implementations
+        $this->load_payment_gateways();
+    }
+
+    /**
+     * Load payment gateway implementations
+     *
+     * @since 1.0.0
+     */
+    private function load_payment_gateways()
+    {
+        $gateways_dir = CHATSHOP_PLUGIN_DIR . 'components/payment/gateways/';
+
+        if (is_dir($gateways_dir)) {
+            $gateway_dirs = glob($gateways_dir . '*', GLOB_ONLYDIR);
+
+            foreach ($gateway_dirs as $gateway_dir) {
+                $gateway_id = basename($gateway_dir);
+                $gateway_files = array(
+                    $gateway_dir . '/class-' . $gateway_id . '-gateway.php',
+                    $gateway_dir . '/class-chatshop-' . $gateway_id . '-gateway.php',
+                );
+
+                foreach ($gateway_files as $gateway_file) {
+                    if (file_exists($gateway_file)) {
+                        require_once $gateway_file;
+                        chatshop_log("Loaded gateway: {$gateway_id}", 'debug');
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Allow plugins/themes to load additional gateways
+        do_action('chatshop_load_payment_gateways');
+    }
+
+    /**
+     * Initialize payment system
+     *
+     * @since 1.0.0
+     */
+    private function init_payment_system()
+    {
+        // Check if payment classes are available
+        if (!class_exists('ChatShop\ChatShop_Payment_Factory')) {
+            chatshop_log('Payment Factory class not found, skipping payment system initialization', 'warning');
+            return;
+        }
+
+        if (!class_exists('ChatShop\ChatShop_Payment_Manager')) {
+            chatshop_log('Payment Manager class not found, skipping payment system initialization', 'warning');
+            return;
+        }
+
+        try {
+            // Initialize payment factory
+            ChatShop_Payment_Factory::init();
+
+            // Initialize payment manager
+            $this->payment_manager = new ChatShop_Payment_Manager();
+
+            chatshop_log('Payment system initialized successfully', 'info');
+        } catch (\Exception $e) {
+            chatshop_log('Payment system initialization failed: ' . $e->getMessage(), 'error');
+            $this->payment_manager = null;
         }
     }
 
@@ -277,6 +373,11 @@ final class ChatShop
     {
         $this->loader->add_action('init', $this, 'init');
         $this->loader->add_action('rest_api_init', $this, 'init_rest_api');
+
+        // Payment system hooks - only if payment manager exists
+        if ($this->payment_manager) {
+            $this->loader->add_action('wp_loaded', $this, 'init_payment_hooks');
+        }
     }
 
     /**
@@ -294,6 +395,50 @@ final class ChatShop
     }
 
     /**
+     * Initialize payment hooks after WordPress is loaded
+     *
+     * @since 1.0.0
+     */
+    public function init_payment_hooks()
+    {
+        // Register webhook endpoints for payment gateways
+        add_action('wp_ajax_nopriv_chatshop_webhook', array($this, 'handle_payment_webhook'));
+        add_action('wp_ajax_chatshop_webhook', array($this, 'handle_payment_webhook'));
+
+        // Allow gateways to register their own hooks
+        do_action('chatshop_payment_hooks_loaded', $this->payment_manager);
+    }
+
+    /**
+     * Handle payment webhook requests
+     *
+     * @since 1.0.0
+     */
+    public function handle_payment_webhook()
+    {
+        $gateway_id = sanitize_key($_GET['gateway'] ?? '');
+
+        if (empty($gateway_id)) {
+            wp_die(__('Invalid webhook request', 'chatshop'), 400);
+        }
+
+        $payload = file_get_contents('php://input');
+        $decoded_payload = json_decode($payload, true);
+
+        if ($this->payment_manager) {
+            $result = $this->payment_manager->process_webhook($decoded_payload, $gateway_id);
+
+            if ($result) {
+                wp_die('OK', 200);
+            } else {
+                wp_die(__('Webhook processing failed', 'chatshop'), 400);
+            }
+        }
+
+        wp_die(__('Payment system not initialized', 'chatshop'), 500);
+    }
+
+    /**
      * Initialize REST API endpoints
      *
      * @since 1.0.0
@@ -308,6 +453,11 @@ final class ChatShop
                 $api = new ChatShop_API();
                 $api->register_routes();
             }
+        }
+
+        // Payment manager will register its own endpoints - only if it exists
+        if ($this->payment_manager && method_exists($this->payment_manager, 'register_api_endpoints')) {
+            $this->payment_manager->register_api_endpoints();
         }
     }
 
@@ -378,6 +528,17 @@ final class ChatShop
     public function get_component_loader()
     {
         return $this->component_loader;
+    }
+
+    /**
+     * Get the payment manager
+     *
+     * @since 1.0.0
+     * @return ChatShop_Payment_Manager|null
+     */
+    public function get_payment_manager()
+    {
+        return $this->payment_manager;
     }
 }
 
@@ -535,4 +696,22 @@ function chatshop_get_component($component_id)
     }
 
     return null;
+}
+
+/**
+ * Helper function to get payment manager instance
+ *
+ * @since 1.0.0
+ * @return ChatShop_Payment_Manager|null
+ */
+function chatshop_get_payment_manager()
+{
+    $plugin = ChatShop::instance();
+    $payment_manager = $plugin->get_payment_manager();
+
+    if (!$payment_manager) {
+        chatshop_log('Payment manager not available', 'warning');
+    }
+
+    return $payment_manager;
 }
