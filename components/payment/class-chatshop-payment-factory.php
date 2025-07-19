@@ -3,47 +3,33 @@
 /**
  * Payment Factory Class
  *
- * Factory class for creating and managing payment gateway instances.
- * Implements factory pattern with dynamic gateway registration.
+ * Factory pattern implementation for creating payment gateway instances.
  *
- * @package    ChatShop
- * @subpackage Components\Payment
- * @since      1.0.0
- * @author     Modewebhost
+ * @package ChatShop
+ * @since 1.0.0
  */
 
 namespace ChatShop;
 
-// If this file is called directly, abort.
-if (!defined('WPINC')) {
-    die;
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
 }
 
 /**
- * Payment Factory Class
- *
- * Handles creation, registration, and management of payment gateway instances
- * using the factory pattern with metadata support.
+ * ChatShop Payment Factory Class
  *
  * @since 1.0.0
  */
 class ChatShop_Payment_Factory
 {
     /**
-     * Registered gateway classes
+     * Registered payment gateways
      *
      * @var array
      * @since 1.0.0
      */
-    private static $gateway_classes = array();
-
-    /**
-     * Gateway metadata
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    private static $gateway_metadata = array();
+    private static $gateways = array();
 
     /**
      * Gateway instances cache
@@ -51,466 +37,446 @@ class ChatShop_Payment_Factory
      * @var array
      * @since 1.0.0
      */
-    private static $gateway_instances = array();
+    private static $instances = array();
 
     /**
-     * Initialize factory
+     * Initialize the payment factory
      *
      * @since 1.0.0
      */
     public static function init()
     {
-        add_action('init', array(__CLASS__, 'load_default_gateways'), 5);
-        add_action('chatshop_load_components', array(__CLASS__, 'discover_gateways'), 10);
+        // Register built-in gateways when they're available
+        add_action('chatshop_load_payment_gateways', array(__CLASS__, 'register_core_gateways'));
+
+        // Allow third-party gateway registration
+        do_action('chatshop_register_payment_gateways', __CLASS__);
+
+        self::log_info('Payment factory initialized');
+    }
+
+    /**
+     * Register core payment gateways
+     *
+     * @since 1.0.0
+     */
+    public static function register_core_gateways()
+    {
+        // This will be called when gateway files are loaded
+        // For now, we just log that we're ready to register gateways
+        self::log_info('Ready to register core payment gateways');
     }
 
     /**
      * Register a payment gateway
      *
-     * @param string $gateway_id Gateway identifier.
-     * @param string $class_name Gateway class name.
-     * @param array  $metadata   Gateway metadata.
-     * @return bool True on success, false on failure.
      * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @param array $config Gateway configuration
+     * @return bool True if registered successfully, false otherwise
      */
-    public static function register_gateway($gateway_id, $class_name, $metadata = array())
+    public static function register_gateway($gateway_id, $config)
     {
-        // Validate inputs
-        if (empty($gateway_id) || empty($class_name)) {
-            chatshop_log('Invalid gateway registration: missing gateway_id or class_name', 'error');
-            return false;
+        // Validate required fields
+        $required_fields = array('class_name', 'name');
+        foreach ($required_fields as $field) {
+            if (empty($config[$field])) {
+                self::log_error("Gateway registration failed: Missing required field '{$field}' for gateway '{$gateway_id}'");
+                return false;
+            }
         }
 
-        // Sanitize gateway ID
-        $gateway_id = sanitize_key($gateway_id);
-
-        // Validate class exists
-        if (!class_exists($class_name)) {
-            chatshop_log("Gateway class {$class_name} does not exist", 'error');
-            return false;
-        }
-
-        // Check if class extends abstract gateway
-        if (!is_subclass_of($class_name, 'ChatShop\ChatShop_Payment_Gateway')) {
-            chatshop_log("Gateway class {$class_name} must extend ChatShop_Payment_Gateway", 'error');
-            return false;
-        }
-
-        // Default metadata
-        $default_metadata = array(
-            'name'        => ucfirst($gateway_id),
+        // Set defaults
+        $defaults = array(
             'description' => '',
-            'version'     => '1.0.0',
-            'author'      => '',
-            'is_premium'  => false,
-            'priority'    => 10,
-            'currencies'  => array(),
-            'features'    => array(),
+            'supports' => array(),
+            'version' => '1.0.0',
+            'enabled' => false,
+            'priority' => 10,
+            'countries' => array(),
+            'currencies' => array()
         );
 
-        $metadata = wp_parse_args($metadata, $default_metadata);
+        $config = array_merge($defaults, $config);
 
-        // Store registration data
-        self::$gateway_classes[$gateway_id] = $class_name;
-        self::$gateway_metadata[$gateway_id] = $metadata;
+        // Validate gateway ID
+        if (!self::is_valid_gateway_id($gateway_id)) {
+            self::log_error("Invalid gateway ID: {$gateway_id}");
+            return false;
+        }
 
-        chatshop_log("Payment gateway '{$gateway_id}' registered successfully", 'info');
+        // Check if already registered
+        if (isset(self::$gateways[$gateway_id])) {
+            self::log_error("Gateway already registered: {$gateway_id}");
+            return false;
+        }
 
-        // Trigger registration event
-        do_action('chatshop_payment_gateway_registered', $gateway_id, $class_name, $metadata);
+        // Store gateway configuration
+        self::$gateways[$gateway_id] = $config;
 
+        self::log_info("Payment gateway registered: {$gateway_id}");
         return true;
     }
 
     /**
      * Unregister a payment gateway
      *
-     * @param string $gateway_id Gateway identifier.
-     * @return bool True on success, false if gateway not found.
      * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return bool True if unregistered successfully, false otherwise
      */
     public static function unregister_gateway($gateway_id)
     {
-        $gateway_id = sanitize_key($gateway_id);
-
-        if (!isset(self::$gateway_classes[$gateway_id])) {
+        if (!isset(self::$gateways[$gateway_id])) {
             return false;
         }
 
-        // Remove from cache
-        unset(self::$gateway_instances[$gateway_id]);
-        unset(self::$gateway_classes[$gateway_id]);
-        unset(self::$gateway_metadata[$gateway_id]);
+        // Remove from instances cache
+        if (isset(self::$instances[$gateway_id])) {
+            unset(self::$instances[$gateway_id]);
+        }
 
-        do_action('chatshop_payment_gateway_unregistered', $gateway_id);
+        unset(self::$gateways[$gateway_id]);
+        self::log_info("Payment gateway unregistered: {$gateway_id}");
+        return true;
+    }
+
+    /**
+     * Create a payment gateway instance
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return object|false Gateway instance or false on failure
+     */
+    public static function create_gateway($gateway_id)
+    {
+        // Check if gateway is registered
+        if (!isset(self::$gateways[$gateway_id])) {
+            self::log_error("Gateway not registered: {$gateway_id}");
+            return false;
+        }
+
+        // Return cached instance if available
+        if (isset(self::$instances[$gateway_id])) {
+            return self::$instances[$gateway_id];
+        }
+
+        $config = self::$gateways[$gateway_id];
+        $class_name = "\\ChatShop\\{$config['class_name']}";
+
+        // Check if class exists
+        if (!class_exists($class_name)) {
+            self::log_error("Gateway class not found: {$class_name}");
+            return false;
+        }
+
+        try {
+            // Create instance
+            $instance = new $class_name($gateway_id);
+
+            // Validate instance
+            if (!$instance instanceof \ChatShop\ChatShop_Payment_Gateway) {
+                self::log_error("Gateway class must extend ChatShop_Payment_Gateway: {$class_name}");
+                return false;
+            }
+
+            // Cache instance
+            self::$instances[$gateway_id] = $instance;
+
+            self::log_info("Payment gateway instance created: {$gateway_id}");
+            return $instance;
+        } catch (\Exception $e) {
+            self::log_error("Failed to create gateway instance '{$gateway_id}': " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get available payment gateways
+     *
+     * @since 1.0.0
+     * @param bool $enabled_only Return only enabled gateways
+     * @return array Array of gateway configurations
+     */
+    public static function get_available_gateways($enabled_only = false)
+    {
+        if (!$enabled_only) {
+            return self::$gateways;
+        }
+
+        $enabled_gateways = array();
+        foreach (self::$gateways as $gateway_id => $config) {
+            if (self::is_gateway_enabled($gateway_id)) {
+                $enabled_gateways[$gateway_id] = $config;
+            }
+        }
+
+        return $enabled_gateways;
+    }
+
+    /**
+     * Get enabled payment gateways sorted by priority
+     *
+     * @since 1.0.0
+     * @return array Array of enabled gateway configurations
+     */
+    public static function get_enabled_gateways()
+    {
+        $enabled = self::get_available_gateways(true);
+
+        // Sort by priority
+        uasort($enabled, function ($a, $b) {
+            return $a['priority'] - $b['priority'];
+        });
+
+        return $enabled;
+    }
+
+    /**
+     * Check if gateway is enabled
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return bool True if enabled, false otherwise
+     */
+    public static function is_gateway_enabled($gateway_id)
+    {
+        if (!isset(self::$gateways[$gateway_id])) {
+            return false;
+        }
+
+        // Check user settings
+        $enabled_gateways = get_option('chatshop_enabled_gateways', array());
+        if (isset($enabled_gateways[$gateway_id])) {
+            return (bool) $enabled_gateways[$gateway_id];
+        }
+
+        // Fall back to default
+        return (bool) self::$gateways[$gateway_id]['enabled'];
+    }
+
+    /**
+     * Enable a payment gateway
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return bool True if enabled successfully, false otherwise
+     */
+    public static function enable_gateway($gateway_id)
+    {
+        if (!isset(self::$gateways[$gateway_id])) {
+            return false;
+        }
+
+        $enabled_gateways = get_option('chatshop_enabled_gateways', array());
+        $enabled_gateways[$gateway_id] = true;
+
+        update_option('chatshop_enabled_gateways', $enabled_gateways);
+        self::log_info("Payment gateway enabled: {$gateway_id}");
 
         return true;
     }
 
     /**
-     * Create gateway instance
+     * Disable a payment gateway
      *
-     * @param string $gateway_id Gateway identifier.
-     * @param bool   $use_cache  Whether to use cached instance.
-     * @return ChatShop_Payment_Gateway|null Gateway instance or null on failure.
      * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return bool True if disabled successfully, false otherwise
      */
-    public static function create_gateway($gateway_id, $use_cache = true)
+    public static function disable_gateway($gateway_id)
     {
-        $gateway_id = sanitize_key($gateway_id);
-
-        // Return cached instance if available and requested
-        if ($use_cache && isset(self::$gateway_instances[$gateway_id])) {
-            return self::$gateway_instances[$gateway_id];
+        if (!isset(self::$gateways[$gateway_id])) {
+            return false;
         }
 
-        // Check if gateway is registered
-        if (!isset(self::$gateway_classes[$gateway_id])) {
-            chatshop_log("Gateway '{$gateway_id}' is not registered", 'warning');
-            return null;
-        }
+        $enabled_gateways = get_option('chatshop_enabled_gateways', array());
+        $enabled_gateways[$gateway_id] = false;
 
-        $class_name = self::$gateway_classes[$gateway_id];
+        update_option('chatshop_enabled_gateways', $enabled_gateways);
+        self::log_info("Payment gateway disabled: {$gateway_id}");
 
-        try {
-            // Create instance
-            $instance = new $class_name();
-
-            // Validate instance
-            if (!$instance instanceof ChatShop_Payment_Gateway) {
-                throw new \Exception("Gateway instance must be of type ChatShop_Payment_Gateway");
-            }
-
-            // Cache instance if requested
-            if ($use_cache) {
-                self::$gateway_instances[$gateway_id] = $instance;
-            }
-
-            chatshop_log("Gateway '{$gateway_id}' instantiated successfully", 'debug');
-
-            return $instance;
-        } catch (\Exception $e) {
-            chatshop_log("Failed to create gateway '{$gateway_id}': " . $e->getMessage(), 'error');
-            return null;
-        }
+        return true;
     }
 
     /**
-     * Get all available gateways
+     * Get gateway configuration
      *
-     * @param bool $include_disabled Whether to include disabled gateways.
-     * @return array Array of gateway instances.
      * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return array|null Gateway configuration or null if not found
      */
-    public static function get_available_gateways($include_disabled = false)
+    public static function get_gateway_config($gateway_id)
     {
-        $gateways = array();
+        return isset(self::$gateways[$gateway_id]) ? self::$gateways[$gateway_id] : null;
+    }
 
-        foreach (array_keys(self::$gateway_classes) as $gateway_id) {
-            $gateway = self::create_gateway($gateway_id);
-
-            if (!$gateway) {
-                continue;
-            }
-
-            // Skip disabled gateways if not requested
-            if (!$include_disabled && !$gateway->is_enabled()) {
-                continue;
-            }
-
-            $gateways[$gateway_id] = $gateway;
+    /**
+     * Get gateway instance (cached)
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return object|false Gateway instance or false if not found
+     */
+    public static function get_gateway_instance($gateway_id)
+    {
+        if (isset(self::$instances[$gateway_id])) {
+            return self::$instances[$gateway_id];
         }
 
-        return $gateways;
-    }
-
-    /**
-     * Get enabled gateways only
-     *
-     * @return array Array of enabled gateway instances.
-     * @since 1.0.0
-     */
-    public static function get_enabled_gateways()
-    {
-        return self::get_available_gateways(false);
-    }
-
-    /**
-     * Get gateway by ID
-     *
-     * @param string $gateway_id Gateway identifier.
-     * @return ChatShop_Payment_Gateway|null Gateway instance or null.
-     * @since 1.0.0
-     */
-    public static function get_gateway($gateway_id)
-    {
         return self::create_gateway($gateway_id);
     }
 
     /**
-     * Check if gateway is registered
+     * Get gateways supporting specific features
      *
-     * @param string $gateway_id Gateway identifier.
-     * @return bool True if registered, false otherwise.
      * @since 1.0.0
+     * @param array $features Array of required features
+     * @return array Array of gateway IDs that support all features
      */
-    public static function is_gateway_registered($gateway_id)
+    public static function get_gateways_supporting($features)
     {
-        return isset(self::$gateway_classes[sanitize_key($gateway_id)]);
+        $supporting_gateways = array();
+
+        foreach (self::$gateways as $gateway_id => $config) {
+            $gateway_supports = $config['supports'];
+
+            // Check if gateway supports all required features
+            if (array_intersect($features, $gateway_supports) === $features) {
+                $supporting_gateways[] = $gateway_id;
+            }
+        }
+
+        return $supporting_gateways;
     }
 
     /**
-     * Get gateway metadata
+     * Get gateways available for specific country/currency
      *
-     * @param string $gateway_id Gateway identifier.
-     * @return array|null Gateway metadata or null if not found.
      * @since 1.0.0
+     * @param string $country_code Country code (ISO 2-letter)
+     * @param string $currency Currency code (ISO 3-letter)
+     * @return array Array of available gateway IDs
      */
-    public static function get_gateway_metadata($gateway_id)
+    public static function get_gateways_for_location($country_code = '', $currency = '')
     {
-        $gateway_id = sanitize_key($gateway_id);
-        return isset(self::$gateway_metadata[$gateway_id]) ? self::$gateway_metadata[$gateway_id] : null;
-    }
+        $available_gateways = array();
 
-    /**
-     * Get all registered gateway metadata
-     *
-     * @return array Array of all gateway metadata.
-     * @since 1.0.0
-     */
-    public static function get_all_gateway_metadata()
-    {
-        return self::$gateway_metadata;
-    }
+        foreach (self::$gateways as $gateway_id => $config) {
+            $available = true;
 
-    /**
-     * Get gateways by criteria
-     *
-     * @param array $criteria Search criteria (currency, features, premium, etc.).
-     * @return array Filtered gateway instances.
-     * @since 1.0.0
-     */
-    public static function get_gateways_by_criteria($criteria = array())
-    {
-        $filtered_gateways = array();
-
-        foreach (self::$gateway_metadata as $gateway_id => $metadata) {
-            $match = true;
+            // Check country support
+            if (!empty($country_code) && !empty($config['countries'])) {
+                if (!in_array($country_code, $config['countries'])) {
+                    $available = false;
+                }
+            }
 
             // Check currency support
-            if (isset($criteria['currency']) && !empty($metadata['currencies'])) {
-                $currency = strtoupper($criteria['currency']);
-                if (!in_array($currency, $metadata['currencies'], true)) {
-                    $match = false;
+            if (!empty($currency) && !empty($config['currencies'])) {
+                if (!in_array($currency, $config['currencies'])) {
+                    $available = false;
                 }
             }
 
-            // Check premium status
-            if (isset($criteria['is_premium'])) {
-                if ((bool) $criteria['is_premium'] !== (bool) $metadata['is_premium']) {
-                    $match = false;
-                }
-            }
-
-            // Check features
-            if (isset($criteria['features']) && is_array($criteria['features'])) {
-                foreach ($criteria['features'] as $feature) {
-                    if (!in_array($feature, $metadata['features'], true)) {
-                        $match = false;
-                        break;
-                    }
-                }
-            }
-
-            // Check enabled status
-            if (isset($criteria['enabled'])) {
-                $gateway = self::get_gateway($gateway_id);
-                if ($gateway && (bool) $criteria['enabled'] !== $gateway->is_enabled()) {
-                    $match = false;
-                }
-            }
-
-            if ($match) {
-                $gateway = self::get_gateway($gateway_id);
-                if ($gateway) {
-                    $filtered_gateways[$gateway_id] = $gateway;
-                }
+            if ($available) {
+                $available_gateways[] = $gateway_id;
             }
         }
 
-        return $filtered_gateways;
+        return $available_gateways;
     }
 
     /**
-     * Get best gateway for currency
+     * Clear gateway instances cache
      *
-     * Returns the highest priority enabled gateway that supports the currency.
-     *
-     * @param string $currency Currency code.
-     * @return ChatShop_Payment_Gateway|null Best gateway or null.
      * @since 1.0.0
+     * @param string $gateway_id Optional gateway ID to clear specific instance
      */
-    public static function get_best_gateway_for_currency($currency)
+    public static function clear_cache($gateway_id = '')
     {
-        $currency = strtoupper(sanitize_text_field($currency));
-        $best_gateway = null;
-        $highest_priority = -1;
-
-        foreach (self::$gateway_metadata as $gateway_id => $metadata) {
-            // Skip if currency not supported
-            if (!empty($metadata['currencies']) && !in_array($currency, $metadata['currencies'], true)) {
-                continue;
+        if (!empty($gateway_id)) {
+            if (isset(self::$instances[$gateway_id])) {
+                unset(self::$instances[$gateway_id]);
             }
-
-            $gateway = self::get_gateway($gateway_id);
-            if (!$gateway || !$gateway->is_enabled()) {
-                continue;
-            }
-
-            // Check if this gateway has higher priority
-            $priority = isset($metadata['priority']) ? (int) $metadata['priority'] : 10;
-            if ($priority > $highest_priority) {
-                $highest_priority = $priority;
-                $best_gateway = $gateway;
-            }
+        } else {
+            self::$instances = array();
         }
 
-        return $best_gateway;
+        self::log_info('Payment gateway cache cleared');
     }
 
     /**
-     * Load default gateways
+     * Validate gateway ID format
      *
      * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return bool True if valid, false otherwise
      */
-    public static function load_default_gateways()
+    private static function is_valid_gateway_id($gateway_id)
     {
-        // Register built-in gateways
-        $default_gateways = array(
-            'paystack' => array(
-                'class'    => 'ChatShop\ChatShop_Paystack_Gateway',
-                'metadata' => array(
-                    'name'        => __('Paystack', 'chatshop'),
-                    'description' => __('Accept payments via Paystack', 'chatshop'),
-                    'currencies'  => array('NGN', 'USD', 'GHS', 'ZAR', 'KES'),
-                    'features'    => array('cards', 'bank_transfer', 'mobile_money', 'webhooks'),
-                    'priority'    => 20,
-                ),
-            ),
-        );
-
-        foreach ($default_gateways as $gateway_id => $config) {
-            if (class_exists($config['class'])) {
-                self::register_gateway($gateway_id, $config['class'], $config['metadata']);
-            }
-        }
-
-        // Allow plugins to register additional gateways
-        do_action('chatshop_register_payment_gateways');
-    }
-
-    /**
-     * Discover gateways from components
-     *
-     * Automatically discover and register gateway classes from component directories.
-     *
-     * @since 1.0.0
-     */
-    public static function discover_gateways()
-    {
-        $gateways_dir = CHATSHOP_PLUGIN_DIR . 'components/payment/gateways/';
-
-        if (!is_dir($gateways_dir)) {
-            return;
-        }
-
-        $gateway_dirs = glob($gateways_dir . '*', GLOB_ONLYDIR);
-
-        foreach ($gateway_dirs as $gateway_dir) {
-            $gateway_id = basename($gateway_dir);
-            $gateway_file = $gateway_dir . '/class-' . $gateway_id . '-gateway.php';
-
-            if (file_exists($gateway_file)) {
-                require_once $gateway_file;
-
-                // Try to auto-register based on naming convention
-                $class_name = 'ChatShop\\ChatShop_' . ucfirst($gateway_id) . '_Gateway';
-
-                if (class_exists($class_name) && !self::is_gateway_registered($gateway_id)) {
-                    self::register_gateway($gateway_id, $class_name);
-                }
-            }
-        }
-    }
-
-    /**
-     * Clear gateway cache
-     *
-     * @since 1.0.0
-     */
-    public static function clear_cache()
-    {
-        self::$gateway_instances = array();
-        chatshop_log('Payment gateway cache cleared', 'debug');
+        // Must be alphanumeric with underscores/hyphens only
+        return preg_match('/^[a-zA-Z0-9_-]+$/', $gateway_id);
     }
 
     /**
      * Get factory statistics
      *
-     * @return array Factory statistics.
      * @since 1.0.0
+     * @return array Factory statistics
      */
     public static function get_stats()
     {
-        $enabled_count = 0;
-        $premium_count = 0;
-
-        foreach (self::$gateway_metadata as $metadata) {
-            if ($metadata['is_premium']) {
-                $premium_count++;
-            }
-        }
-
-        foreach (self::get_available_gateways() as $gateway) {
-            if ($gateway->is_enabled()) {
-                $enabled_count++;
-            }
-        }
-
         return array(
-            'total_registered' => count(self::$gateway_classes),
-            'total_enabled'    => $enabled_count,
-            'premium_gateways' => $premium_count,
-            'cached_instances' => count(self::$gateway_instances),
+            'total_gateways' => count(self::$gateways),
+            'enabled_gateways' => count(self::get_enabled_gateways()),
+            'cached_instances' => count(self::$instances),
+            'registered_gateways' => array_keys(self::$gateways)
         );
     }
 
     /**
-     * Validate gateway configuration
+     * Export factory data for debugging
      *
-     * @param string $gateway_id Gateway identifier.
-     * @return array Validation result.
      * @since 1.0.0
+     * @return array Factory data
      */
-    public static function validate_gateway_config($gateway_id)
+    public static function export_data()
     {
-        $gateway = self::get_gateway($gateway_id);
-        $errors = array();
-
-        if (!$gateway) {
-            $errors[] = __('Gateway not found or failed to instantiate.', 'chatshop');
-            return array('valid' => false, 'errors' => $errors);
-        }
-
-        // Test connection if gateway supports it
-        $connection_test = $gateway->test_connection();
-        if (!$connection_test['success']) {
-            $errors[] = $connection_test['message'];
-        }
-
         return array(
-            'valid'  => empty($errors),
-            'errors' => $errors,
+            'gateways' => self::$gateways,
+            'instances' => array_keys(self::$instances),
+            'settings' => get_option('chatshop_enabled_gateways', array())
         );
+    }
+
+    /**
+     * Log error message
+     *
+     * @since 1.0.0
+     * @param string $message Error message
+     */
+    private static function log_error($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'error');
+        } else {
+            error_log("ChatShop Payment Factory: {$message}");
+        }
+    }
+
+    /**
+     * Log info message
+     *
+     * @since 1.0.0
+     * @param string $message Info message
+     */
+    private static function log_info($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'info');
+        } else {
+            error_log("ChatShop Payment Factory: {$message}");
+        }
     }
 }

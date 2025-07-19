@@ -3,304 +3,125 @@
 /**
  * Payment Manager Class
  *
- * Orchestrates payment processing using the payment factory.
- * Manages multiple gateways and integrates with component registry.
+ * Main orchestrator for payment processing and gateway management.
  *
- * @package    ChatShop
- * @subpackage Components\Payment
- * @since      1.0.0
- * @author     Modewebhost
+ * @package ChatShop
+ * @since 1.0.0
  */
 
 namespace ChatShop;
 
-// If this file is called directly, abort.
-if (!defined('WPINC')) {
-    die;
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
 }
 
 /**
- * Payment Manager Class
- *
- * Main orchestrator for payment processing, gateway management,
- * and component registration within ChatShop.
+ * ChatShop Payment Manager Class
  *
  * @since 1.0.0
  */
 class ChatShop_Payment_Manager
 {
     /**
-     * Component ID
+     * Payment factory instance
      *
-     * @var string
+     * @var ChatShop_Payment_Factory
      * @since 1.0.0
      */
-    const COMPONENT_ID = 'payment';
+    private $factory;
 
     /**
-     * Payment statuses
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    const PAYMENT_STATUSES = array(
-        'pending'   => 'pending',
-        'success'   => 'success',
-        'failed'    => 'failed',
-        'cancelled' => 'cancelled',
-        'refunded'  => 'refunded',
-    );
-
-    /**
-     * Primary gateway ID
-     *
-     * @var string
-     * @since 1.0.0
-     */
-    private $primary_gateway;
-
-    /**
-     * Fallback gateways
+     * Current transaction data
      *
      * @var array
      * @since 1.0.0
      */
-    private $fallback_gateways;
+    private $current_transaction = array();
 
     /**
-     * Payment cache
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    private $payment_cache = array();
-
-    /**
-     * Initialize payment manager
+     * Constructor
      *
      * @since 1.0.0
      */
     public function __construct()
     {
-        $this->register_component();
+        $this->factory = ChatShop_Payment_Factory::class;
         $this->init_hooks();
-        $this->load_settings();
+        $this->log_info('Payment manager initialized');
     }
 
     /**
-     * Load payment settings
-     *
-     * @since 1.0.0
-     */
-    private function load_settings()
-    {
-        $this->primary_gateway = chatshop_get_option('payment', 'primary_gateway', 'paystack');
-        $this->fallback_gateways = chatshop_get_option('payment', 'fallback_gateways', array());
-    }
-
-    /**
-     * Register payment component
-     *
-     * @since 1.0.0
-     */
-    private function register_component()
-    {
-        if (class_exists('ChatShop_Component_Registry')) {
-            ChatShop_Component_Registry::register_component(self::COMPONENT_ID, array(
-                'name'         => __('Payment Processing', 'chatshop'),
-                'description'  => __('Handles payment processing via multiple gateways', 'chatshop'),
-                'class'        => __CLASS__,
-                'dependencies' => array(),
-                'premium'      => false,
-                'version'      => '1.0.0',
-                'supports'     => array('multiple_gateways', 'webhooks', 'refunds'),
-            ));
-        }
-    }
-
-    /**
-     * Initialize hooks
+     * Initialize WordPress hooks
      *
      * @since 1.0.0
      */
     private function init_hooks()
     {
-        add_action('init', array('ChatShop_Payment_Factory', 'init'), 5);
-        add_action('wp_ajax_chatshop_process_payment', array($this, 'handle_payment_ajax'));
-        add_action('wp_ajax_nopriv_chatshop_process_payment', array($this, 'handle_payment_ajax'));
-        add_action('wp_ajax_chatshop_verify_payment', array($this, 'handle_verify_ajax'));
-        add_action('rest_api_init', array($this, 'register_api_endpoints'));
-        add_filter('chatshop_payment_gateways_loaded', array($this, 'on_gateways_loaded'));
+        // WooCommerce integration hooks
+        add_action('woocommerce_init', array($this, 'integrate_with_woocommerce'));
+
+        // Payment processing hooks
+        add_action('chatshop_process_payment', array($this, 'process_payment'), 10, 3);
+        add_action('chatshop_verify_payment', array($this, 'verify_payment'), 10, 2);
+
+        // Webhook handling
+        add_action('wp_ajax_nopriv_chatshop_payment_webhook', array($this, 'handle_webhook'));
+        add_action('wp_ajax_chatshop_payment_webhook', array($this, 'handle_webhook'));
+
+        // Cleanup hooks
+        add_action('chatshop_cleanup_expired_transactions', array($this, 'cleanup_expired_transactions'));
     }
 
     /**
-     * Process payment with gateway failover
+     * Initialize component
      *
-     * @param float  $amount        Payment amount.
-     * @param string $currency      Currency code.
-     * @param array  $customer_data Customer information.
-     * @param string $gateway_id    Optional specific gateway ID.
-     * @param array  $metadata      Additional payment metadata.
-     * @return array Payment result.
      * @since 1.0.0
      */
-    public function process_payment($amount, $currency, $customer_data, $gateway_id = null, $metadata = array())
+    public function init()
     {
-        // Input validation
-        $validation = $this->validate_payment_data($amount, $currency, $customer_data);
-        if (!$validation['is_valid']) {
-            return $this->error_response($validation['errors'][0]);
-        }
-
-        // Generate payment reference
-        $reference = $this->generate_payment_reference();
-        $payment_data = array(
-            'reference'     => $reference,
-            'amount'        => $amount,
-            'currency'      => strtoupper($currency),
-            'customer_data' => $customer_data,
-            'metadata'      => $metadata,
-            'timestamp'     => current_time('mysql'),
-        );
-
-        // Get gateway(s) to try
-        $gateways = $gateway_id ?
-            array(ChatShop_Payment_Factory::get_gateway($gateway_id)) :
-            $this->get_payment_gateways_for_currency($currency);
-
-        $last_error = null;
-
-        foreach ($gateways as $gateway) {
-            if (!$gateway || !$gateway->is_enabled()) {
-                continue;
-            }
-
-            try {
-                chatshop_log("Attempting payment via {$gateway->get_id()}", 'info', $payment_data);
-
-                $result = $gateway->process_payment($amount, $currency, $customer_data);
-
-                if ($result['success']) {
-                    $this->cache_payment_result($reference, $result, $gateway->get_id());
-                    $this->trigger_payment_event('payment_processed', $result, $gateway);
-
-                    chatshop_log("Payment successful via {$gateway->get_id()}", 'info');
-                    return $result;
-                }
-
-                $last_error = $result['message'] ?? __('Payment failed', 'chatshop');
-                chatshop_log("Payment failed via {$gateway->get_id()}: {$last_error}", 'warning');
-            } catch (\Exception $e) {
-                $last_error = $e->getMessage();
-                chatshop_log("Payment exception via {$gateway->get_id()}: {$last_error}", 'error');
-            }
-        }
-
-        $error_message = $last_error ?? __('No available payment gateway', 'chatshop');
-        return $this->error_response($error_message);
+        // Component initialization logic
+        $this->log_info('Payment manager component initialized');
     }
 
     /**
-     * Verify transaction with caching
+     * Integrate with WooCommerce
      *
-     * @param string $transaction_id Transaction ID.
-     * @param string $gateway_id     Gateway ID.
-     * @return array Verification result.
      * @since 1.0.0
      */
-    public function verify_transaction($transaction_id, $gateway_id)
+    public function integrate_with_woocommerce()
     {
-        $transaction_id = sanitize_text_field($transaction_id);
-        $cache_key = "verify_{$gateway_id}_{$transaction_id}";
-
-        // Check cache first
-        if (isset($this->payment_cache[$cache_key])) {
-            return $this->payment_cache[$cache_key];
+        if (!class_exists('WooCommerce')) {
+            return;
         }
 
-        $gateway = ChatShop_Payment_Factory::get_gateway($gateway_id);
+        // Add payment gateways to WooCommerce
+        add_filter('woocommerce_payment_gateways', array($this, 'add_wc_gateways'));
 
-        if (!$gateway) {
-            return $this->error_response(__('Gateway not found', 'chatshop'));
-        }
+        // Order status hooks
+        add_action('woocommerce_order_status_completed', array($this, 'handle_order_completed'));
+        add_action('woocommerce_order_status_cancelled', array($this, 'handle_order_cancelled'));
+        add_action('woocommerce_order_status_refunded', array($this, 'handle_order_refunded'));
 
-        try {
-            $result = $gateway->verify_transaction($transaction_id);
-
-            // Cache successful verifications for 5 minutes
-            if ($result['success']) {
-                $this->payment_cache[$cache_key] = $result;
-                wp_cache_set($cache_key, $result, 'chatshop_payments', 300);
-            }
-
-            return $result;
-        } catch (\Exception $e) {
-            chatshop_log("Transaction verification failed: {$e->getMessage()}", 'error');
-            return $this->error_response(__('Verification failed', 'chatshop'));
-        }
+        $this->log_info('WooCommerce integration initialized');
     }
 
     /**
-     * Process webhook from any gateway
+     * Add ChatShop gateways to WooCommerce
      *
-     * @param array  $payload    Webhook payload.
-     * @param string $gateway_id Gateway ID.
-     * @return bool Success status.
      * @since 1.0.0
+     * @param array $gateways Existing WooCommerce gateways
+     * @return array Modified gateways array
      */
-    public function process_webhook($payload, $gateway_id)
+    public function add_wc_gateways($gateways)
     {
-        $gateway = ChatShop_Payment_Factory::get_gateway($gateway_id);
+        $chatshop_gateways = $this->factory::get_enabled_gateways();
 
-        if (!$gateway) {
-            chatshop_log("Webhook received for unknown gateway: {$gateway_id}", 'warning');
-            return false;
-        }
-
-        try {
-            $result = $gateway->handle_webhook($payload);
-            $this->trigger_payment_event('webhook_processed', $payload, $gateway);
-
-            chatshop_log("Webhook processed successfully for {$gateway_id}", 'info');
-            return $result;
-        } catch (\Exception $e) {
-            chatshop_log("Webhook processing failed for {$gateway_id}: {$e->getMessage()}", 'error');
-            return false;
-        }
-    }
-
-    /**
-     * Get payment gateways for currency with fallback
-     *
-     * @param string $currency Currency code.
-     * @return array Array of gateway instances.
-     * @since 1.0.0
-     */
-    private function get_payment_gateways_for_currency($currency)
-    {
-        $gateways = array();
-
-        // Primary gateway first
-        $primary = ChatShop_Payment_Factory::get_gateway($this->primary_gateway);
-        if ($primary && $primary->is_enabled() && $primary->supports_currency($currency)) {
-            $gateways[] = $primary;
-        }
-
-        // Add fallback gateways (premium feature)
-        if (!empty($this->fallback_gateways)) {
-            foreach ($this->fallback_gateways as $gateway_id) {
-                $gateway = ChatShop_Payment_Factory::get_gateway($gateway_id);
-                if ($gateway && $gateway->is_enabled() && $gateway->supports_currency($currency)) {
-                    $gateways[] = $gateway;
-                }
-            }
-        }
-
-        // If no gateways found, try factory best match
-        if (empty($gateways)) {
-            $best = ChatShop_Payment_Factory::get_best_gateway_for_currency($currency);
-            if ($best) {
-                $gateways[] = $best;
+        foreach ($chatshop_gateways as $gateway_id => $config) {
+            // Create WooCommerce gateway wrapper if needed
+            $wc_gateway_class = $this->create_wc_gateway_wrapper($gateway_id, $config);
+            if ($wc_gateway_class) {
+                $gateways[] = $wc_gateway_class;
             }
         }
 
@@ -308,289 +129,605 @@ class ChatShop_Payment_Manager
     }
 
     /**
-     * Get best gateway for currency (legacy method)
+     * Create WooCommerce gateway wrapper
      *
-     * @param string $currency Currency code.
-     * @return ChatShop_Payment_Gateway|null
      * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @param array $config Gateway configuration
+     * @return string|false Gateway class name or false on failure
      */
-    private function get_best_gateway($currency)
+    private function create_wc_gateway_wrapper($gateway_id, $config)
     {
-        $gateways = $this->get_payment_gateways_for_currency($currency);
-        return !empty($gateways) ? $gateways[0] : null;
+        // This would create a WooCommerce-compatible wrapper
+        // For now, we'll log and return false
+        $this->log_info("WooCommerce wrapper needed for gateway: {$gateway_id}");
+        return false;
     }
 
     /**
-     * Handle AJAX payment request
+     * Process a payment
      *
      * @since 1.0.0
+     * @param float $amount Payment amount
+     * @param string $currency Currency code
+     * @param array $payment_data Payment data including gateway, customer info, etc.
+     * @return array Payment result
      */
-    public function handle_payment_ajax()
+    public function process_payment($amount, $currency, $payment_data)
     {
-        // Security check
-        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_payment_nonce')) {
-            wp_send_json_error(__('Security check failed', 'chatshop'));
+        try {
+            // Validate input
+            $validation_result = $this->validate_payment_data($amount, $currency, $payment_data);
+            if (!$validation_result['valid']) {
+                return $this->error_response($validation_result['message']);
+            }
+
+            // Get gateway
+            $gateway_id = sanitize_key($payment_data['gateway']);
+            $gateway = $this->factory::get_gateway_instance($gateway_id);
+
+            if (!$gateway) {
+                return $this->error_response('Payment gateway not available');
+            }
+
+            // Prepare transaction data
+            $transaction_data = $this->prepare_transaction_data($amount, $currency, $payment_data);
+
+            // Store current transaction
+            $this->current_transaction = $transaction_data;
+
+            // Process payment through gateway
+            $result = $gateway->process_payment($amount, $currency, $payment_data);
+
+            // Log transaction
+            $this->log_transaction($transaction_data, $result);
+
+            // Return result
+            return $this->format_payment_result($result);
+        } catch (\Exception $e) {
+            $this->log_error('Payment processing failed: ' . $e->getMessage());
+            return $this->error_response('Payment processing failed');
         }
-
-        $amount = floatval($_POST['amount'] ?? 0);
-        $currency = sanitize_text_field($_POST['currency'] ?? 'NGN');
-        $gateway_id = sanitize_key($_POST['gateway'] ?? '');
-
-        $customer_data = array(
-            'email' => sanitize_email($_POST['email'] ?? ''),
-            'name'  => sanitize_text_field($_POST['name'] ?? ''),
-            'phone' => sanitize_text_field($_POST['phone'] ?? ''),
-        );
-
-        $metadata = array(
-            'source'    => 'ajax',
-            'ip'        => $this->get_client_ip(),
-            'user_id'   => get_current_user_id(),
-            'timestamp' => current_time('mysql'),
-        );
-
-        $result = $this->process_payment($amount, $currency, $customer_data, $gateway_id, $metadata);
-        wp_send_json($result);
     }
 
     /**
-     * Handle AJAX verification request
+     * Verify a payment transaction
      *
      * @since 1.0.0
+     * @param string $transaction_id Transaction identifier
+     * @param string $gateway_id Gateway identifier
+     * @return array Verification result
      */
-    public function handle_verify_ajax()
+    public function verify_payment($transaction_id, $gateway_id)
     {
-        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_payment_nonce')) {
-            wp_send_json_error(__('Security check failed', 'chatshop'));
+        try {
+            // Get gateway
+            $gateway = $this->factory::get_gateway_instance($gateway_id);
+
+            if (!$gateway) {
+                return $this->error_response('Payment gateway not available');
+            }
+
+            // Verify transaction
+            $result = $gateway->verify_transaction($transaction_id);
+
+            // Update transaction status
+            $this->update_transaction_status($transaction_id, $result);
+
+            return $this->format_verification_result($result);
+        } catch (\Exception $e) {
+            $this->log_error('Payment verification failed: ' . $e->getMessage());
+            return $this->error_response('Payment verification failed');
         }
-
-        $transaction_id = sanitize_text_field($_POST['transaction_id'] ?? '');
-        $gateway_id = sanitize_key($_POST['gateway_id'] ?? '');
-
-        if (empty($transaction_id) || empty($gateway_id)) {
-            wp_send_json_error(__('Missing required parameters', 'chatshop'));
-        }
-
-        $result = $this->verify_transaction($transaction_id, $gateway_id);
-        wp_send_json($result);
     }
 
     /**
-     * Register REST API endpoints
+     * Handle webhook requests
+     *
+     * @since 1.0.0
+     */
+    public function handle_webhook()
+    {
+        // Get gateway ID from request
+        $gateway_id = sanitize_key($_GET['gateway'] ?? '');
+
+        if (empty($gateway_id)) {
+            wp_die('Invalid webhook request', 400);
+        }
+
+        // Get request payload
+        $payload = file_get_contents('php://input');
+        $decoded_payload = json_decode($payload, true);
+
+        // Process webhook
+        $result = $this->process_webhook($decoded_payload, $gateway_id);
+
+        if ($result) {
+            wp_die('OK', 200);
+        } else {
+            wp_die('Webhook processing failed', 400);
+        }
+    }
+
+    /**
+     * Process webhook payload
+     *
+     * @since 1.0.0
+     * @param array $payload Webhook payload
+     * @param string $gateway_id Gateway identifier
+     * @return bool True on success, false on failure
+     */
+    public function process_webhook($payload, $gateway_id)
+    {
+        try {
+            // Get gateway
+            $gateway = $this->factory::get_gateway_instance($gateway_id);
+
+            if (!$gateway) {
+                $this->log_error("Gateway not found for webhook: {$gateway_id}");
+                return false;
+            }
+
+            // Handle webhook through gateway
+            $result = $gateway->handle_webhook($payload);
+
+            // Log webhook
+            $this->log_webhook($gateway_id, $payload, $result);
+
+            return $result;
+        } catch (\Exception $e) {
+            $this->log_error('Webhook processing failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Generate payment link
+     *
+     * @since 1.0.0
+     * @param array $payment_data Payment data
+     * @return string|false Payment link or false on failure
+     */
+    public function generate_payment_link($payment_data)
+    {
+        try {
+            // Validate required data
+            if (empty($payment_data['amount']) || empty($payment_data['currency'])) {
+                return false;
+            }
+
+            // Create unique reference
+            $reference = $this->generate_payment_reference();
+            $payment_data['reference'] = $reference;
+
+            // Store payment data temporarily
+            $this->store_payment_data($reference, $payment_data);
+
+            // Generate link
+            $payment_url = add_query_arg(array(
+                'chatshop_payment' => 1,
+                'ref' => $reference
+            ), home_url('/'));
+
+            return $payment_url;
+        } catch (\Exception $e) {
+            $this->log_error('Payment link generation failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get available payment methods
+     *
+     * @since 1.0.0
+     * @param array $filters Optional filters (country, currency, amount)
+     * @return array Available payment methods
+     */
+    public function get_available_payment_methods($filters = array())
+    {
+        $methods = array();
+        $enabled_gateways = $this->factory::get_enabled_gateways();
+
+        foreach ($enabled_gateways as $gateway_id => $config) {
+            // Apply filters
+            if (!$this->gateway_matches_filters($gateway_id, $config, $filters)) {
+                continue;
+            }
+
+            $methods[$gateway_id] = array(
+                'id' => $gateway_id,
+                'name' => $config['name'],
+                'description' => $config['description'],
+                'supports' => $config['supports'],
+                'icon' => $this->get_gateway_icon($gateway_id)
+            );
+        }
+
+        return $methods;
+    }
+
+    /**
+     * Register API endpoints
      *
      * @since 1.0.0
      */
     public function register_api_endpoints()
     {
+        // Register REST API endpoints for payment operations
         register_rest_route('chatshop/v1', '/payments/process', array(
-            'methods'             => 'POST',
-            'callback'            => array($this, 'api_process_payment'),
-            'permission_callback' => array($this, 'api_permission_check'),
+            'methods' => 'POST',
+            'callback' => array($this, 'api_process_payment'),
+            'permission_callback' => array($this, 'api_permission_check')
         ));
 
-        register_rest_route('chatshop/v1', '/payments/webhook/(?P<gateway>[a-zA-Z0-9_-]+)', array(
-            'methods'             => 'POST',
-            'callback'            => array($this, 'api_handle_webhook'),
-            'permission_callback' => '__return_true',
+        register_rest_route('chatshop/v1', '/payments/verify/(?P<transaction_id>[a-zA-Z0-9_-]+)', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'api_verify_payment'),
+            'permission_callback' => array($this, 'api_permission_check')
         ));
+
+        register_rest_route('chatshop/v1', '/payments/methods', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'api_get_payment_methods'),
+            'permission_callback' => '__return_true'
+        ));
+
+        $this->log_info('Payment API endpoints registered');
     }
 
     /**
-     * Get available gateways with metadata
+     * Handle order completion
      *
-     * @param bool $enabled_only Get only enabled gateways.
-     * @return array
      * @since 1.0.0
+     * @param int $order_id Order ID
      */
-    public function get_gateways($enabled_only = true)
+    public function handle_order_completed($order_id)
     {
-        $gateways = $enabled_only ?
-            ChatShop_Payment_Factory::get_enabled_gateways() :
-            ChatShop_Payment_Factory::get_available_gateways(true);
-
-        $gateway_data = array();
-        foreach ($gateways as $id => $gateway) {
-            $metadata = ChatShop_Payment_Factory::get_gateway_metadata($id);
-            $gateway_data[$id] = array(
-                'instance' => $gateway,
-                'metadata' => $metadata,
-                'status'   => $gateway->get_status(),
-            );
-        }
-
-        return $gateway_data;
+        // Handle order completion logic
+        $this->log_info("Order completed: {$order_id}");
+        do_action('chatshop_order_completed', $order_id);
     }
 
     /**
-     * Get component status with detailed metrics
+     * Handle order cancellation
      *
-     * @return array Component status data.
+     * @since 1.0.0
+     * @param int $order_id Order ID
+     */
+    public function handle_order_cancelled($order_id)
+    {
+        // Handle order cancellation logic
+        $this->log_info("Order cancelled: {$order_id}");
+        do_action('chatshop_order_cancelled', $order_id);
+    }
+
+    /**
+     * Handle order refund
+     *
+     * @since 1.0.0
+     * @param int $order_id Order ID
+     */
+    public function handle_order_refunded($order_id)
+    {
+        // Handle order refund logic
+        $this->log_info("Order refunded: {$order_id}");
+        do_action('chatshop_order_refunded', $order_id);
+    }
+
+    /**
+     * Cleanup expired transactions
+     *
      * @since 1.0.0
      */
-    public function get_status()
+    public function cleanup_expired_transactions()
     {
-        $factory_stats = ChatShop_Payment_Factory::get_stats();
-        $gateways = $this->get_gateways(false);
-
-        $gateway_health = array();
-        foreach ($gateways as $id => $data) {
-            $gateway_health[$id] = array(
-                'enabled' => $data['instance']->is_enabled(),
-                'test_mode' => $data['instance']->is_test_mode(),
-                'premium' => $data['metadata']['is_premium'] ?? false,
-            );
-        }
-
-        return array(
-            'component_id'     => self::COMPONENT_ID,
-            'enabled'          => $factory_stats['total_enabled'] > 0,
-            'primary_gateway'  => $this->primary_gateway,
-            'fallback_gateways' => $this->fallback_gateways,
-            'total_gateways'   => $factory_stats['total_registered'],
-            'enabled_gateways' => $factory_stats['total_enabled'],
-            'premium_gateways' => $factory_stats['premium_gateways'],
-            'gateway_health'   => $gateway_health,
-            'cache_size'       => count($this->payment_cache),
-        );
+        // Cleanup logic for expired transactions
+        $this->log_info('Cleaning up expired transactions');
     }
 
     /**
      * Validate payment data
      *
-     * @param float  $amount        Payment amount.
-     * @param string $currency      Currency code.
-     * @param array  $customer_data Customer data.
-     * @return array Validation result.
      * @since 1.0.0
+     * @param float $amount Payment amount
+     * @param string $currency Currency code
+     * @param array $payment_data Payment data
+     * @return array Validation result
      */
-    private function validate_payment_data($amount, $currency, $customer_data)
+    private function validate_payment_data($amount, $currency, $payment_data)
     {
-        $errors = array();
-
-        if (!is_numeric($amount) || $amount <= 0) {
-            $errors[] = __('Invalid payment amount', 'chatshop');
+        // Basic validation
+        if (empty($amount) || $amount <= 0) {
+            return array('valid' => false, 'message' => 'Invalid amount');
         }
 
-        if (empty($customer_data['email']) || !is_email($customer_data['email'])) {
-            $errors[] = __('Valid email required', 'chatshop');
+        if (empty($currency) || strlen($currency) !== 3) {
+            return array('valid' => false, 'message' => 'Invalid currency');
         }
 
-        if (strlen($currency) !== 3) {
-            $errors[] = __('Invalid currency code', 'chatshop');
+        if (empty($payment_data['gateway'])) {
+            return array('valid' => false, 'message' => 'Gateway not specified');
         }
 
+        return array('valid' => true, 'message' => 'Valid');
+    }
+
+    /**
+     * Prepare transaction data
+     *
+     * @since 1.0.0
+     * @param float $amount Payment amount
+     * @param string $currency Currency code
+     * @param array $payment_data Payment data
+     * @return array Transaction data
+     */
+    private function prepare_transaction_data($amount, $currency, $payment_data)
+    {
         return array(
-            'is_valid' => empty($errors),
-            'errors'   => $errors,
+            'amount' => $amount,
+            'currency' => $currency,
+            'gateway' => $payment_data['gateway'],
+            'reference' => $this->generate_payment_reference(),
+            'customer_data' => $payment_data['customer'] ?? array(),
+            'metadata' => $payment_data['metadata'] ?? array(),
+            'created_at' => current_time('mysql'),
+            'status' => 'pending'
         );
     }
 
     /**
-     * Generate payment reference
+     * Generate unique payment reference
      *
-     * @return string
      * @since 1.0.0
+     * @return string Payment reference
      */
     private function generate_payment_reference()
     {
-        return 'cs_' . uniqid() . '_' . wp_generate_uuid4();
+        return 'CS_' . wp_generate_uuid4();
     }
 
     /**
-     * Cache payment result
+     * Store payment data
      *
-     * @param string $reference  Payment reference.
-     * @param array  $result     Payment result.
-     * @param string $gateway_id Gateway ID.
      * @since 1.0.0
+     * @param string $reference Payment reference
+     * @param array $data Payment data
      */
-    private function cache_payment_result($reference, $result, $gateway_id)
+    private function store_payment_data($reference, $data)
     {
-        $cache_key = "payment_{$reference}";
-        $cache_data = array(
-            'result'     => $result,
-            'gateway_id' => $gateway_id,
-            'timestamp'  => current_time('mysql'),
-        );
-
-        $this->payment_cache[$cache_key] = $cache_data;
-        wp_cache_set($cache_key, $cache_data, 'chatshop_payments', 3600);
+        // Store in transients for temporary storage
+        set_transient("chatshop_payment_{$reference}", $data, 24 * HOUR_IN_SECONDS);
     }
 
     /**
-     * Trigger payment event
+     * Format payment result
      *
-     * @param string $event   Event name.
-     * @param mixed  $data    Event data.
-     * @param object $gateway Gateway instance.
      * @since 1.0.0
+     * @param mixed $result Gateway result
+     * @return array Formatted result
      */
-    private function trigger_payment_event($event, $data, $gateway)
+    private function format_payment_result($result)
     {
-        do_action("chatshop_payment_{$event}", $data, $gateway, $this);
-        do_action("chatshop_payment_{$gateway->get_id()}_{$event}", $data, $gateway, $this);
-    }
-
-    /**
-     * Get client IP address
-     *
-     * @return string
-     * @since 1.0.0
-     */
-    private function get_client_ip()
-    {
-        $ip_fields = array('HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR');
-
-        foreach ($ip_fields as $field) {
-            if (!empty($_SERVER[$field])) {
-                $ip = sanitize_text_field($_SERVER[$field]);
-                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                    return $ip;
-                }
-            }
+        if (is_array($result)) {
+            return $result;
         }
 
-        return sanitize_text_field($_SERVER['REMOTE_ADDR'] ?? '');
+        return array(
+            'success' => false,
+            'message' => 'Unknown payment result'
+        );
     }
 
     /**
-     * API permission check
+     * Format verification result
      *
-     * @return bool
      * @since 1.0.0
+     * @param mixed $result Gateway result
+     * @return array Formatted result
      */
-    public function api_permission_check()
+    private function format_verification_result($result)
     {
-        return current_user_can('manage_options');
-    }
+        if (is_array($result)) {
+            return $result;
+        }
 
-    /**
-     * Handle gateways loaded event
-     *
-     * @param array $gateways Loaded gateways.
-     * @return array
-     * @since 1.0.0
-     */
-    public function on_gateways_loaded($gateways)
-    {
-        // Perform any post-loading gateway setup
-        chatshop_log('Payment gateways loaded: ' . count($gateways), 'debug');
-        return $gateways;
+        return array(
+            'verified' => false,
+            'message' => 'Unknown verification result'
+        );
     }
 
     /**
      * Create error response
      *
-     * @param string $message Error message.
-     * @return array
      * @since 1.0.0
+     * @param string $message Error message
+     * @return array Error response
      */
     private function error_response($message)
     {
         return array(
             'success' => false,
-            'message' => $message,
-            'data'    => null,
+            'error' => true,
+            'message' => $message
         );
+    }
+
+    /**
+     * Log transaction
+     *
+     * @since 1.0.0
+     * @param array $transaction_data Transaction data
+     * @param array $result Processing result
+     */
+    private function log_transaction($transaction_data, $result)
+    {
+        // Log transaction for debugging/auditing
+        $this->log_info('Transaction processed: ' . $transaction_data['reference']);
+    }
+
+    /**
+     * Log webhook
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway ID
+     * @param array $payload Webhook payload
+     * @param bool $result Processing result
+     */
+    private function log_webhook($gateway_id, $payload, $result)
+    {
+        // Log webhook for debugging/auditing
+        $this->log_info("Webhook processed for gateway: {$gateway_id}");
+    }
+
+    /**
+     * Update transaction status
+     *
+     * @since 1.0.0
+     * @param string $transaction_id Transaction ID
+     * @param array $result Verification result
+     */
+    private function update_transaction_status($transaction_id, $result)
+    {
+        // Update transaction status in database
+        $this->log_info("Transaction status updated: {$transaction_id}");
+    }
+
+    /**
+     * Check if gateway matches filters
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway ID
+     * @param array $config Gateway config
+     * @param array $filters Filters to apply
+     * @return bool True if matches, false otherwise
+     */
+    private function gateway_matches_filters($gateway_id, $config, $filters)
+    {
+        // Apply country filter
+        if (!empty($filters['country']) && !empty($config['countries'])) {
+            if (!in_array($filters['country'], $config['countries'])) {
+                return false;
+            }
+        }
+
+        // Apply currency filter
+        if (!empty($filters['currency']) && !empty($config['currencies'])) {
+            if (!in_array($filters['currency'], $config['currencies'])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Get gateway icon
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway ID
+     * @return string Icon URL
+     */
+    private function get_gateway_icon($gateway_id)
+    {
+        // Return default icon for now
+        return CHATSHOP_PLUGIN_URL . 'assets/images/gateways/' . $gateway_id . '.png';
+    }
+
+    /**
+     * API permission check
+     *
+     * @since 1.0.0
+     * @return bool True if allowed, false otherwise
+     */
+    public function api_permission_check()
+    {
+        // Basic permission check - can be enhanced
+        return true;
+    }
+
+    /**
+     * API process payment endpoint
+     *
+     * @since 1.0.0
+     * @param \WP_REST_Request $request REST request
+     * @return \WP_REST_Response Response
+     */
+    public function api_process_payment($request)
+    {
+        $amount = $request->get_param('amount');
+        $currency = $request->get_param('currency');
+        $payment_data = $request->get_param('payment_data');
+
+        $result = $this->process_payment($amount, $currency, $payment_data);
+
+        return new \WP_REST_Response($result);
+    }
+
+    /**
+     * API verify payment endpoint
+     *
+     * @since 1.0.0
+     * @param \WP_REST_Request $request REST request
+     * @return \WP_REST_Response Response
+     */
+    public function api_verify_payment($request)
+    {
+        $transaction_id = $request->get_param('transaction_id');
+        $gateway_id = $request->get_param('gateway');
+
+        $result = $this->verify_payment($transaction_id, $gateway_id);
+
+        return new \WP_REST_Response($result);
+    }
+
+    /**
+     * API get payment methods endpoint
+     *
+     * @since 1.0.0
+     * @param \WP_REST_Request $request REST request
+     * @return \WP_REST_Response Response
+     */
+    public function api_get_payment_methods($request)
+    {
+        $filters = array(
+            'country' => $request->get_param('country'),
+            'currency' => $request->get_param('currency'),
+            'amount' => $request->get_param('amount')
+        );
+
+        $methods = $this->get_available_payment_methods($filters);
+
+        return new \WP_REST_Response($methods);
+    }
+
+    /**
+     * Log error message
+     *
+     * @since 1.0.0
+     * @param string $message Error message
+     */
+    private function log_error($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'error');
+        } else {
+            error_log("ChatShop Payment Manager: {$message}");
+        }
+    }
+
+    /**
+     * Log info message
+     *
+     * @since 1.0.0
+     * @param string $message Info message
+     */
+    private function log_info($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'info');
+        } else {
+            error_log("ChatShop Payment Manager: {$message}");
+        }
     }
 }

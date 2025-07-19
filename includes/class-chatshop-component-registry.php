@@ -1,10 +1,11 @@
 <?php
 
 /**
- * Component Registry for ChatShop Plugin
+ * Component Registry Class
+ *
+ * Manages component registration and configuration.
  *
  * @package ChatShop
- * @subpackage ChatShop/includes
  * @since 1.0.0
  */
 
@@ -16,9 +17,7 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Component Registry Class
- *
- * Manages registration and loading of plugin components
+ * ChatShop Component Registry Class
  *
  * @since 1.0.0
  */
@@ -27,133 +26,209 @@ class ChatShop_Component_Registry
     /**
      * Registered components
      *
-     * @since 1.0.0
      * @var array
+     * @since 1.0.0
      */
-    private static $components = array();
+    private $components = array();
 
     /**
-     * Loaded components
+     * Component settings option name
      *
+     * @var string
      * @since 1.0.0
-     * @var array
      */
-    private static $loaded_components = array();
+    private $settings_option = 'chatshop_component_settings';
 
     /**
-     * Component dependencies
+     * Constructor
      *
      * @since 1.0.0
-     * @var array
      */
-    private static $dependencies = array();
+    public function __construct()
+    {
+        $this->load_settings();
+    }
 
     /**
      * Register a component
      *
      * @since 1.0.0
-     * @param string $component_id   Unique component identifier
-     * @param array  $args          Component arguments
+     * @param array $config Component configuration
+     * @return bool True if registered successfully, false otherwise
      */
-    public static function register_component($component_id, $args = array())
+    public function register_component($config)
     {
+        // Validate required fields
+        $required_fields = array('id', 'name', 'path', 'main_file', 'class_name');
+        foreach ($required_fields as $field) {
+            if (empty($config[$field])) {
+                $this->log_error("Component registration failed: Missing required field '{$field}'");
+                return false;
+            }
+        }
+
+        // Set defaults
         $defaults = array(
-            'name'         => '',
-            'description'  => '',
-            'version'      => '1.0.0',
-            'file'         => '',
-            'class'        => '',
+            'description' => '',
             'dependencies' => array(),
-            'enabled'      => true,
-            'priority'     => 10
+            'version' => '1.0.0',
+            'enabled' => false,
+            'auto_load' => true,
+            'priority' => 10
         );
 
-        $args = wp_parse_args($args, $defaults);
+        $config = wp_parse_args($config, $defaults);
 
-        // Validate required fields
-        if (empty($args['file']) || empty($args['class'])) {
+        // Validate component ID
+        if (!$this->is_valid_component_id($config['id'])) {
+            $this->log_error("Invalid component ID: {$config['id']}");
             return false;
         }
 
-        self::$components[$component_id] = $args;
-
-        // Store dependencies
-        if (!empty($args['dependencies'])) {
-            self::$dependencies[$component_id] = $args['dependencies'];
+        // Check if already registered
+        if (isset($this->components[$config['id']])) {
+            $this->log_error("Component already registered: {$config['id']}");
+            return false;
         }
 
+        // Store component configuration
+        $this->components[$config['id']] = $config;
+
+        $this->log_info("Component registered: {$config['id']}");
         return true;
+    }
+
+    /**
+     * Unregister a component
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool True if unregistered successfully, false otherwise
+     */
+    public function unregister_component($component_id)
+    {
+        if (!isset($this->components[$component_id])) {
+            return false;
+        }
+
+        unset($this->components[$component_id]);
+        $this->log_info("Component unregistered: {$component_id}");
+        return true;
+    }
+
+    /**
+     * Get component configuration
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return array|null Component configuration or null if not found
+     */
+    public function get_component($component_id)
+    {
+        return isset($this->components[$component_id]) ? $this->components[$component_id] : null;
     }
 
     /**
      * Get all registered components
      *
      * @since 1.0.0
-     * @return array
+     * @return array Array of component configurations
      */
-    public static function get_components()
+    public function get_all_components()
     {
-        return self::$components;
+        return $this->components;
     }
 
     /**
-     * Get a specific component
+     * Get enabled components
      *
      * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return array|false
+     * @return array Array of enabled component configurations
      */
-    public static function get_component($component_id)
+    public function get_enabled_components()
     {
-        return isset(self::$components[$component_id]) ? self::$components[$component_id] : false;
+        $enabled = array();
+
+        foreach ($this->components as $component_id => $component) {
+            if ($this->is_component_enabled($component_id)) {
+                $enabled[$component_id] = $component;
+            }
+        }
+
+        // Sort by priority
+        uasort($enabled, function ($a, $b) {
+            return $a['priority'] - $b['priority'];
+        });
+
+        return $enabled;
     }
 
     /**
-     * Check if component is registered
+     * Check if component is enabled
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool
+     * @return bool True if enabled, false otherwise
      */
-    public static function is_registered($component_id)
+    public function is_component_enabled($component_id)
     {
-        return isset(self::$components[$component_id]);
+        if (!isset($this->components[$component_id])) {
+            return false;
+        }
+
+        $settings = get_option($this->settings_option, array());
+
+        // Check user settings first
+        if (isset($settings[$component_id]['enabled'])) {
+            return (bool) $settings[$component_id]['enabled'];
+        }
+
+        // Fall back to default
+        return (bool) $this->components[$component_id]['enabled'];
     }
 
     /**
-     * Check if component is loaded
+     * Enable a component
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool
+     * @return bool True if enabled successfully, false otherwise
      */
-    public static function is_loaded($component_id)
+    public function enable_component($component_id)
     {
-        return isset(self::$loaded_components[$component_id]);
+        if (!isset($this->components[$component_id])) {
+            return false;
+        }
+
+        $settings = get_option($this->settings_option, array());
+        $settings[$component_id]['enabled'] = true;
+
+        update_option($this->settings_option, $settings);
+        $this->log_info("Component enabled: {$component_id}");
+
+        return true;
     }
 
     /**
-     * Mark component as loaded
+     * Disable a component
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @param object $instance     Component instance
+     * @return bool True if disabled successfully, false otherwise
      */
-    public static function mark_loaded($component_id, $instance = null)
+    public function disable_component($component_id)
     {
-        self::$loaded_components[$component_id] = $instance;
-    }
+        if (!isset($this->components[$component_id])) {
+            return false;
+        }
 
-    /**
-     * Get loaded component instance
-     *
-     * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return object|null
-     */
-    public static function get_loaded_component($component_id)
-    {
-        return isset(self::$loaded_components[$component_id]) ? self::$loaded_components[$component_id] : null;
+        $settings = get_option($this->settings_option, array());
+        $settings[$component_id]['enabled'] = false;
+
+        update_option($this->settings_option, $settings);
+        $this->log_info("Component disabled: {$component_id}");
+
+        return true;
     }
 
     /**
@@ -161,30 +236,50 @@ class ChatShop_Component_Registry
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return array
+     * @return array Array of dependency IDs
      */
-    public static function get_dependencies($component_id)
+    public function get_dependencies($component_id)
     {
-        return isset(self::$dependencies[$component_id]) ? self::$dependencies[$component_id] : array();
+        if (!isset($this->components[$component_id])) {
+            return array();
+        }
+
+        return $this->components[$component_id]['dependencies'];
     }
 
     /**
-     * Check if component dependencies are met
+     * Get components that depend on the given component
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool
+     * @return array Array of dependent component IDs
      */
-    public static function dependencies_met($component_id)
+    public function get_dependents($component_id)
     {
-        $dependencies = self::get_dependencies($component_id);
+        $dependents = array();
 
-        if (empty($dependencies)) {
-            return true;
+        foreach ($this->components as $id => $component) {
+            if (in_array($component_id, $component['dependencies'])) {
+                $dependents[] = $id;
+            }
         }
 
+        return $dependents;
+    }
+
+    /**
+     * Validate component dependencies
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool True if dependencies are valid, false otherwise
+     */
+    public function validate_dependencies($component_id)
+    {
+        $dependencies = $this->get_dependencies($component_id);
+
         foreach ($dependencies as $dependency) {
-            if (!self::is_loaded($dependency)) {
+            if (!isset($this->components[$dependency])) {
                 return false;
             }
         }
@@ -193,136 +288,125 @@ class ChatShop_Component_Registry
     }
 
     /**
-     * Get components ordered by priority and dependencies
-     *
-     * @since 1.0.0
-     * @return array
-     */
-    public static function get_load_order()
-    {
-        $components = self::$components;
-        $loaded = array();
-        $order = array();
-
-        // Sort by priority first
-        uasort($components, function ($a, $b) {
-            return $a['priority'] - $b['priority'];
-        });
-
-        // Resolve dependencies
-        while (!empty($components)) {
-            $progress = false;
-
-            foreach ($components as $id => $component) {
-                // Skip disabled components
-                if (!$component['enabled']) {
-                    unset($components[$id]);
-                    $progress = true;
-                    continue;
-                }
-
-                // Check if dependencies are loaded
-                $dependencies = self::get_dependencies($id);
-                $can_load = true;
-
-                foreach ($dependencies as $dependency) {
-                    if (!in_array($dependency, $loaded)) {
-                        $can_load = false;
-                        break;
-                    }
-                }
-
-                if ($can_load) {
-                    $order[] = $id;
-                    $loaded[] = $id;
-                    unset($components[$id]);
-                    $progress = true;
-                }
-            }
-
-            // Prevent infinite loop if dependencies can't be resolved
-            if (!$progress) {
-                break;
-            }
-        }
-
-        return $order;
-    }
-
-    /**
-     * Enable component
+     * Update component configuration
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool
+     * @param array $config New configuration
+     * @return bool True if updated successfully, false otherwise
      */
-    public static function enable_component($component_id)
+    public function update_component($component_id, $config)
     {
-        if (isset(self::$components[$component_id])) {
-            self::$components[$component_id]['enabled'] = true;
-            return true;
+        if (!isset($this->components[$component_id])) {
+            return false;
         }
-        return false;
+
+        $this->components[$component_id] = array_merge($this->components[$component_id], $config);
+        return true;
     }
 
     /**
-     * Disable component
+     * Get component setting
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool
+     * @param string $setting_key Setting key
+     * @param mixed $default Default value
+     * @return mixed Setting value
      */
-    public static function disable_component($component_id)
+    public function get_component_setting($component_id, $setting_key, $default = null)
     {
-        if (isset(self::$components[$component_id])) {
-            self::$components[$component_id]['enabled'] = false;
-            return true;
+        $settings = get_option($this->settings_option, array());
+
+        if (isset($settings[$component_id][$setting_key])) {
+            return $settings[$component_id][$setting_key];
         }
-        return false;
+
+        return $default;
     }
 
     /**
-     * Unregister component
+     * Update component setting
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool
+     * @param string $setting_key Setting key
+     * @param mixed $value Setting value
+     * @return bool True if updated successfully, false otherwise
      */
-    public static function unregister_component($component_id)
+    public function update_component_setting($component_id, $setting_key, $value)
     {
-        if (isset(self::$components[$component_id])) {
-            unset(self::$components[$component_id]);
-            unset(self::$loaded_components[$component_id]);
-            unset(self::$dependencies[$component_id]);
-            return true;
-        }
-        return false;
+        $settings = get_option($this->settings_option, array());
+        $settings[$component_id][$setting_key] = $value;
+
+        return update_option($this->settings_option, $settings);
     }
 
     /**
-     * Get component status
+     * Load component settings from database
+     *
+     * @since 1.0.0
+     */
+    private function load_settings()
+    {
+        // Settings are loaded when needed
+        // This method is for future use if needed
+    }
+
+    /**
+     * Validate component ID
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return array
+     * @return bool True if valid, false otherwise
      */
-    public static function get_component_status($component_id)
+    private function is_valid_component_id($component_id)
     {
-        if (!self::is_registered($component_id)) {
-            return array(
-                'registered' => false,
-                'loaded'     => false,
-                'enabled'    => false
-            );
-        }
+        // Must be alphanumeric with underscores/hyphens only
+        return preg_match('/^[a-zA-Z0-9_-]+$/', $component_id);
+    }
 
-        $component = self::get_component($component_id);
-
+    /**
+     * Export component registry for debugging
+     *
+     * @since 1.0.0
+     * @return array Registry data
+     */
+    public function export_registry()
+    {
         return array(
-            'registered' => true,
-            'loaded'     => self::is_loaded($component_id),
-            'enabled'    => $component['enabled'],
-            'dependencies_met' => self::dependencies_met($component_id)
+            'components' => $this->components,
+            'settings' => get_option($this->settings_option, array())
         );
+    }
+
+    /**
+     * Log error message
+     *
+     * @since 1.0.0
+     * @param string $message Error message
+     */
+    private function log_error($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'error');
+        } else {
+            error_log("ChatShop Component Registry: {$message}");
+        }
+    }
+
+    /**
+     * Log info message
+     *
+     * @since 1.0.0
+     * @param string $message Info message
+     */
+    private function log_info($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'info');
+        } else {
+            error_log("ChatShop Component Registry: {$message}");
+        }
     }
 }
