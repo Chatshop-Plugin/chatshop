@@ -35,6 +35,7 @@ define('CHATSHOP_PLUGIN_BASENAME', plugin_basename(__FILE__));
  * Load core classes
  */
 require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-loader.php';
+require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-logger.php';
 require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-i18n.php';
 require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-activator.php';
 require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-deactivator.php';
@@ -141,6 +142,7 @@ final class ChatShop
     {
         $this->load_dependencies();
         $this->init_loader();
+        $this->init_logger();
         $this->set_locale();
         $this->check_requirements();
         $this->init_payment_system();
@@ -246,7 +248,7 @@ final class ChatShop
         }
 
         try {
-            // Initialize payment factory
+            // Initialize payment factory - Use fully qualified class name
             ChatShop_Payment_Factory::init();
 
             // Initialize payment manager
@@ -270,14 +272,26 @@ final class ChatShop
     }
 
     /**
+     * Initialize the logger
+     *
+     * @since 1.0.0
+     */
+    private function init_logger()
+    {
+        ChatShop_Logger::init();
+    }
+
+    /**
      * Define the locale for internationalization
      *
      * @since 1.0.0
      */
     private function set_locale()
     {
-        $plugin_i18n = new ChatShop_i18n();
-        $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
+        if (class_exists('ChatShop\ChatShop_i18n')) {
+            $plugin_i18n = new ChatShop_i18n();
+            $this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
+        }
     }
 
     /**
@@ -297,8 +311,20 @@ final class ChatShop
      */
     public function check_dependencies()
     {
-        $errors = ChatShop_Activator::get_activation_errors();
+        // Basic dependency checks
+        $errors = array();
 
+        // Check PHP version
+        if (version_compare(PHP_VERSION, '7.4', '<')) {
+            $errors[] = sprintf(__('ChatShop requires PHP 7.4 or higher. You are running PHP %s.', 'chatshop'), PHP_VERSION);
+        }
+
+        // Check WordPress version
+        if (version_compare(get_bloginfo('version'), '5.0', '<')) {
+            $errors[] = sprintf(__('ChatShop requires WordPress 5.0 or higher. You are running WordPress %s.', 'chatshop'), get_bloginfo('version'));
+        }
+
+        // Display errors if any
         if (!empty($errors)) {
             add_action('admin_notices', function () use ($errors) {
 ?>
@@ -322,7 +348,7 @@ final class ChatShop
      */
     private function define_admin_hooks()
     {
-        if (is_admin() && class_exists('\ChatShop\ChatShop_Admin')) {
+        if (is_admin() && class_exists('ChatShop\ChatShop_Admin')) {
             $this->admin = new ChatShop_Admin();
 
             // Admin initialization
@@ -345,7 +371,7 @@ final class ChatShop
      */
     private function define_public_hooks()
     {
-        if (class_exists('\ChatShop\ChatShop_Public')) {
+        if (class_exists('ChatShop\ChatShop_Public')) {
             $this->public = new ChatShop_Public();
 
             // Public scripts and styles
@@ -549,7 +575,9 @@ final class ChatShop
  */
 function chatshop_activate()
 {
-    ChatShop_Activator::activate();
+    if (class_exists('ChatShop\ChatShop_Activator')) {
+        ChatShop_Activator::activate();
+    }
 
     // Hook for extensions
     do_action('chatshop_activated');
@@ -562,7 +590,9 @@ function chatshop_activate()
  */
 function chatshop_deactivate()
 {
-    ChatShop_Deactivator::deactivate();
+    if (class_exists('ChatShop\ChatShop_Deactivator')) {
+        ChatShop_Deactivator::deactivate();
+    }
 
     // Hook for extensions
     do_action('chatshop_deactivated');
@@ -581,60 +611,20 @@ register_deactivation_hook(__FILE__, '\ChatShop\chatshop_deactivate');
  *
  * @since 1.0.0
  */
-function chatshop_run()
+function run_chatshop()
 {
     $plugin = ChatShop::instance();
     $plugin->run();
 }
 
-// Run the plugin
-chatshop_run();
-
-/**
- * Helper function to get the main plugin instance
- *
- * @since 1.0.0
- * @return ChatShop
- */
-function chatshop()
-{
-    return ChatShop::instance();
-}
-
-/**
- * Helper function for logging
- * 
- * IMPORTANT: This function is declared once here in the main plugin file
- * to prevent redeclaration errors. Other files should use this function
- * by calling \ChatShop\chatshop_log() directly.
- *
- * @since 1.0.0
- * @param string $message Log message
- * @param string $level   Log level (error, warning, info, debug)
- */
-function chatshop_log($message, $level = 'info')
-{
-    if (!defined('WP_DEBUG') || !WP_DEBUG) {
-        return;
-    }
-
-    $general_options = get_option('chatshop_general_options', array());
-    $log_level = isset($general_options['log_level']) ? $general_options['log_level'] : 'error';
-
-    $levels = array('error' => 1, 'warning' => 2, 'info' => 3, 'debug' => 4);
-    $current_level = isset($levels[$log_level]) ? $levels[$log_level] : 1;
-    $message_level = isset($levels[$level]) ? $levels[$level] : 1;
-
-    if ($message_level <= $current_level) {
-        error_log("[ChatShop] [{$level}] {$message}");
-    }
-}
+// Start the plugin
+run_chatshop();
 
 /**
  * Helper function to check if plugin is enabled
  *
  * @since 1.0.0
- * @return bool
+ * @return bool True if enabled, false otherwise
  */
 function chatshop_is_enabled()
 {
