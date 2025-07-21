@@ -1,12 +1,14 @@
 <?php
 
 /**
- * ChatShop Logger Class
+ * ChatShop Logger
  *
- * Simple logging utility for the ChatShop plugin.
+ * Comprehensive logging system with multiple levels, file rotation,
+ * and database logging for debugging and monitoring.
  *
- * @package ChatShop
- * @since 1.0.0
+ * @package    ChatShop
+ * @subpackage ChatShop/includes
+ * @since      1.0.0
  */
 
 namespace ChatShop;
@@ -26,32 +28,67 @@ class ChatShop_Logger
     /**
      * Log levels
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
-    const LEVELS = array(
-        'debug' => 0,
-        'info' => 1,
-        'warning' => 2,
-        'error' => 3,
-        'critical' => 4
+    private static $log_levels = array(
+        'emergency' => 0,
+        'alert'     => 1,
+        'critical'  => 2,
+        'error'     => 3,
+        'warning'   => 4,
+        'notice'    => 5,
+        'info'      => 6,
+        'debug'     => 7
     );
 
     /**
-     * Log file path
+     * Current log level
      *
-     * @var string
      * @since 1.0.0
+     * @var int
      */
-    private static $log_file;
+    private static $current_level = 6; // info
+
+    /**
+     * Log directory
+     *
+     * @since 1.0.0
+     * @var string
+     */
+    private static $log_dir = '';
+
+    /**
+     * Database logging enabled
+     *
+     * @since 1.0.0
+     * @var bool
+     */
+    private static $db_logging = false;
+
+    /**
+     * File logging enabled
+     *
+     * @since 1.0.0
+     * @var bool
+     */
+    private static $file_logging = true;
 
     /**
      * Maximum log file size in bytes
      *
-     * @var int
      * @since 1.0.0
+     * @var int
      */
-    private static $max_file_size = 5242880; // 5MB
+    private static $max_file_size = 10485760; // 10MB
+
+    /**
+     * Maximum number of log files to keep
+     *
+     * @since 1.0.0
+     * @var int
+     */
+    private static $max_files = 5;
 
     /**
      * Initialize logger
@@ -60,17 +97,24 @@ class ChatShop_Logger
      */
     public static function init()
     {
-        $upload_dir = wp_upload_dir();
-        $log_dir = $upload_dir['basedir'] . '/chatshop-logs';
+        // Set log directory
+        self::$log_dir = WP_CONTENT_DIR . '/chatshop-logs/';
 
-        // Create log directory if it doesn't exist
-        if (!file_exists($log_dir)) {
-            wp_mkdir_p($log_dir);
-            // Add .htaccess to protect log files
-            file_put_contents($log_dir . '/.htaccess', 'Deny from all');
+        // Load settings
+        $options = chatshop_get_option('general', '', array());
+        self::$current_level = isset($options['log_level']) ? intval($options['log_level']) : 6;
+        self::$file_logging = isset($options['file_logging']) ? (bool) $options['file_logging'] : true;
+        self::$db_logging = isset($options['db_logging']) ? (bool) $options['db_logging'] : false;
+
+        // Create log directory
+        self::create_log_directory();
+
+        // Set up cleanup cron
+        if (!wp_next_scheduled('chatshop_cleanup_logs')) {
+            wp_schedule_event(time(), 'daily', 'chatshop_cleanup_logs');
         }
 
-        self::$log_file = $log_dir . '/chatshop.log';
+        add_action('chatshop_cleanup_logs', array(__CLASS__, 'cleanup_old_logs'));
     }
 
     /**
@@ -78,82 +122,58 @@ class ChatShop_Logger
      *
      * @since 1.0.0
      * @param string $message Log message
-     * @param string $level Log level (debug, info, warning, error, critical)
-     * @param array $context Additional context
+     * @param string $level Log level
+     * @param array  $context Additional context
      */
     public static function log($message, $level = 'info', $context = array())
     {
-        // Only log if WP_DEBUG is enabled or level is warning or higher
-        if (!WP_DEBUG && self::LEVELS[$level] < self::LEVELS['warning']) {
+        $level = strtolower($level);
+
+        // Check if we should log this level
+        if (!self::should_log($level)) {
             return;
         }
 
-        // Initialize if not done
-        if (empty(self::$log_file)) {
-            self::init();
+        $log_entry = self::format_log_entry($message, $level, $context);
+
+        // File logging
+        if (self::$file_logging) {
+            self::write_to_file($log_entry, $level);
         }
 
-        // Rotate log if it's too large
-        self::rotate_log_if_needed();
+        // Database logging
+        if (self::$db_logging) {
+            self::write_to_database($message, $level, $context);
+        }
 
-        // Format message
-        $formatted_message = self::format_message($message, $level, $context);
-
-        // Write to file
-        error_log($formatted_message, 3, self::$log_file);
-
-        // Also log to WordPress debug.log if enabled
-        if (WP_DEBUG_LOG) {
-            error_log("ChatShop [{$level}]: {$message}");
+        // WordPress debug log
+        if (defined('WP_DEBUG') && WP_DEBUG && defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+            error_log($log_entry);
         }
     }
 
     /**
-     * Log debug message
+     * Log emergency message
      *
      * @since 1.0.0
      * @param string $message Log message
-     * @param array $context Additional context
+     * @param array  $context Additional context
      */
-    public static function debug($message, $context = array())
+    public static function emergency($message, $context = array())
     {
-        self::log($message, 'debug', $context);
+        self::log($message, 'emergency', $context);
     }
 
     /**
-     * Log info message
+     * Log alert message
      *
      * @since 1.0.0
      * @param string $message Log message
-     * @param array $context Additional context
+     * @param array  $context Additional context
      */
-    public static function info($message, $context = array())
+    public static function alert($message, $context = array())
     {
-        self::log($message, 'info', $context);
-    }
-
-    /**
-     * Log warning message
-     *
-     * @since 1.0.0
-     * @param string $message Log message
-     * @param array $context Additional context
-     */
-    public static function warning($message, $context = array())
-    {
-        self::log($message, 'warning', $context);
-    }
-
-    /**
-     * Log error message
-     *
-     * @since 1.0.0
-     * @param string $message Log message
-     * @param array $context Additional context
-     */
-    public static function error($message, $context = array())
-    {
-        self::log($message, 'error', $context);
+        self::log($message, 'alert', $context);
     }
 
     /**
@@ -161,7 +181,7 @@ class ChatShop_Logger
      *
      * @since 1.0.0
      * @param string $message Log message
-     * @param array $context Additional context
+     * @param array  $context Additional context
      */
     public static function critical($message, $context = array())
     {
@@ -169,166 +189,559 @@ class ChatShop_Logger
     }
 
     /**
-     * Format log message
+     * Log error message
+     *
+     * @since 1.0.0
+     * @param string $message Log message
+     * @param array  $context Additional context
+     */
+    public static function error($message, $context = array())
+    {
+        self::log($message, 'error', $context);
+    }
+
+    /**
+     * Log warning message
+     *
+     * @since 1.0.0
+     * @param string $message Log message
+     * @param array  $context Additional context
+     */
+    public static function warning($message, $context = array())
+    {
+        self::log($message, 'warning', $context);
+    }
+
+    /**
+     * Log notice message
+     *
+     * @since 1.0.0
+     * @param string $message Log message
+     * @param array  $context Additional context
+     */
+    public static function notice($message, $context = array())
+    {
+        self::log($message, 'notice', $context);
+    }
+
+    /**
+     * Log info message
+     *
+     * @since 1.0.0
+     * @param string $message Log message
+     * @param array  $context Additional context
+     */
+    public static function info($message, $context = array())
+    {
+        self::log($message, 'info', $context);
+    }
+
+    /**
+     * Log debug message
+     *
+     * @since 1.0.0
+     * @param string $message Log message
+     * @param array  $context Additional context
+     */
+    public static function debug($message, $context = array())
+    {
+        self::log($message, 'debug', $context);
+    }
+
+    /**
+     * Check if we should log this level
+     *
+     * @since 1.0.0
+     * @param string $level Log level
+     * @return bool Whether to log
+     */
+    private static function should_log($level)
+    {
+        if (!isset(self::$log_levels[$level])) {
+            return false;
+        }
+
+        return self::$log_levels[$level] <= self::$current_level;
+    }
+
+    /**
+     * Format log entry
      *
      * @since 1.0.0
      * @param string $message Log message
      * @param string $level Log level
-     * @param array $context Additional context
-     * @return string Formatted message
+     * @param array  $context Additional context
+     * @return string Formatted log entry
      */
-    private static function format_message($message, $level, $context)
+    private static function format_log_entry($message, $level, $context)
     {
         $timestamp = current_time('Y-m-d H:i:s');
-        $level = strtoupper($level);
+        $level_upper = strtoupper($level);
 
-        $formatted = "[{$timestamp}] {$level}: {$message}";
+        $entry = "[{$timestamp}] ChatShop.{$level_upper}: {$message}";
 
         // Add context if provided
         if (!empty($context)) {
-            $formatted .= ' | Context: ' . wp_json_encode($context);
+            $entry .= ' ' . wp_json_encode($context);
         }
 
-        return $formatted . PHP_EOL;
+        // Add memory usage for debug level
+        if ($level === 'debug') {
+            $memory = number_format(memory_get_usage(true) / 1024 / 1024, 2);
+            $entry .= " [Memory: {$memory}MB]";
+        }
+
+        return $entry;
     }
 
     /**
-     * Rotate log file if it exceeds size limit
+     * Write log entry to file
      *
      * @since 1.0.0
+     * @param string $log_entry Formatted log entry
+     * @param string $level Log level
      */
-    private static function rotate_log_if_needed()
+    private static function write_to_file($log_entry, $level)
     {
-        if (!file_exists(self::$log_file)) {
-            return;
+        $log_file = self::get_log_file($level);
+
+        // Check if file rotation is needed
+        if (file_exists($log_file) && filesize($log_file) > self::$max_file_size) {
+            self::rotate_log_file($log_file);
         }
 
-        if (filesize(self::$log_file) > self::$max_file_size) {
-            $backup_file = self::$log_file . '.backup';
+        // Write to file
+        $result = file_put_contents($log_file, $log_entry . PHP_EOL, FILE_APPEND | LOCK_EX);
 
-            // Remove old backup
-            if (file_exists($backup_file)) {
-                unlink($backup_file);
-            }
-
-            // Move current log to backup
-            rename(self::$log_file, $backup_file);
+        if ($result === false) {
+            error_log('ChatShop: Failed to write to log file: ' . $log_file);
         }
     }
 
     /**
-     * Get log file contents
+     * Write log entry to database
      *
      * @since 1.0.0
-     * @param int $lines Number of lines to retrieve (0 for all)
-     * @return string Log contents
+     * @param string $message Log message
+     * @param string $level Log level
+     * @param array  $context Additional context
      */
-    public static function get_log_contents($lines = 100)
+    private static function write_to_database($message, $level, $context)
     {
-        if (!file_exists(self::$log_file)) {
-            return '';
-        }
+        global $wpdb;
 
-        if ($lines === 0) {
-            return file_get_contents(self::$log_file);
-        }
+        $table_name = $wpdb->prefix . 'chatshop_logs';
 
-        // Get last N lines
-        $file = file(self::$log_file);
-        $total_lines = count($file);
-        $start = max(0, $total_lines - $lines);
+        $data = array(
+            'level' => $level,
+            'message' => $message,
+            'context' => wp_json_encode($context),
+            'user_id' => get_current_user_id(),
+            'ip_address' => self::get_client_ip(),
+            'user_agent' => isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field($_SERVER['HTTP_USER_AGENT']) : '',
+            'created_at' => current_time('mysql')
+        );
 
-        return implode('', array_slice($file, $start));
-    }
-
-    /**
-     * Clear log file
-     *
-     * @since 1.0.0
-     * @return bool True on success, false on failure
-     */
-    public static function clear_log()
-    {
-        if (file_exists(self::$log_file)) {
-            return unlink(self::$log_file);
-        }
-
-        return true;
+        $wpdb->insert($table_name, $data);
     }
 
     /**
      * Get log file path
      *
      * @since 1.0.0
+     * @param string $level Log level
      * @return string Log file path
      */
-    public static function get_log_file_path()
+    private static function get_log_file($level)
     {
-        if (empty(self::$log_file)) {
-            self::init();
+        $date = current_time('Y-m-d');
+        return self::$log_dir . "chatshop-{$level}-{$date}.log";
+    }
+
+    /**
+     * Create log directory
+     *
+     * @since 1.0.0
+     */
+    private static function create_log_directory()
+    {
+        if (!file_exists(self::$log_dir)) {
+            wp_mkdir_p(self::$log_dir);
+
+            // Create .htaccess to protect log files
+            $htaccess_content = "Order deny,allow\nDeny from all\n";
+            file_put_contents(self::$log_dir . '.htaccess', $htaccess_content);
+
+            // Create index.php to prevent directory listing
+            file_put_contents(self::$log_dir . 'index.php', '<?php // Silence is golden');
+        }
+    }
+
+    /**
+     * Rotate log file
+     *
+     * @since 1.0.0
+     * @param string $log_file Log file path
+     */
+    private static function rotate_log_file($log_file)
+    {
+        $base_name = pathinfo($log_file, PATHINFO_FILENAME);
+        $extension = pathinfo($log_file, PATHINFO_EXTENSION);
+        $directory = dirname($log_file);
+
+        // Move existing numbered files
+        for ($i = self::$max_files - 1; $i >= 1; $i--) {
+            $old_file = "{$directory}/{$base_name}.{$i}.{$extension}";
+            $new_file = "{$directory}/{$base_name}." . ($i + 1) . ".{$extension}";
+
+            if (file_exists($old_file)) {
+                if ($i + 1 > self::$max_files) {
+                    unlink($old_file); // Delete oldest file
+                } else {
+                    rename($old_file, $new_file);
+                }
+            }
         }
 
-        return self::$log_file;
+        // Move current file to .1
+        $rotated_file = "{$directory}/{$base_name}.1.{$extension}";
+        rename($log_file, $rotated_file);
     }
 
     /**
-     * Get log file URL (if accessible)
+     * Cleanup old log files
      *
      * @since 1.0.0
-     * @return string|false Log file URL or false if not accessible
      */
-    public static function get_log_file_url()
+    public static function cleanup_old_logs()
     {
-        $upload_dir = wp_upload_dir();
-        $log_dir_url = $upload_dir['baseurl'] . '/chatshop-logs';
+        if (!is_dir(self::$log_dir)) {
+            return;
+        }
 
-        return $log_dir_url . '/chatshop.log';
+        $files = glob(self::$log_dir . '*.log*');
+        $cutoff_time = time() - (30 * DAY_IN_SECONDS); // 30 days
+
+        foreach ($files as $file) {
+            if (filemtime($file) < $cutoff_time) {
+                unlink($file);
+            }
+        }
+
+        // Cleanup database logs older than 30 days
+        if (self::$db_logging) {
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'chatshop_logs';
+            $cutoff_date = date('Y-m-d H:i:s', $cutoff_time);
+
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM {$table_name} WHERE created_at < %s",
+                $cutoff_date
+            ));
+        }
     }
 
     /**
-     * Check if logging is enabled
+     * Get recent logs
      *
      * @since 1.0.0
-     * @return bool True if enabled, false otherwise
+     * @param int    $limit Number of logs to retrieve
+     * @param string $level Specific level to filter (optional)
+     * @return array Recent logs
      */
-    public static function is_logging_enabled()
+    public static function get_recent_logs($limit = 100, $level = '')
     {
-        return WP_DEBUG || get_option('chatshop_enable_logging', false);
+        if (!self::$db_logging) {
+            return array();
+        }
+
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'chatshop_logs';
+
+        $where_clause = '';
+        if (!empty($level)) {
+            $where_clause = $wpdb->prepare("WHERE level = %s", $level);
+        }
+
+        $query = $wpdb->prepare(
+            "SELECT * FROM {$table_name} {$where_clause} ORDER BY created_at DESC LIMIT %d",
+            $limit
+        );
+
+        return $wpdb->get_results($query, ARRAY_A);
     }
 
     /**
      * Get log statistics
      *
      * @since 1.0.0
+     * @param string $period Period (today, week, month)
      * @return array Log statistics
      */
-    public static function get_log_stats()
+    public static function get_log_statistics($period = 'today')
     {
-        $stats = array(
-            'file_exists' => false,
-            'file_size' => 0,
-            'line_count' => 0,
-            'last_modified' => null
-        );
-
-        if (file_exists(self::$log_file)) {
-            $stats['file_exists'] = true;
-            $stats['file_size'] = filesize(self::$log_file);
-            $stats['line_count'] = count(file(self::$log_file));
-            $stats['last_modified'] = filemtime(self::$log_file);
+        if (!self::$db_logging) {
+            return array();
         }
 
-        return $stats;
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'chatshop_logs';
+
+        // Determine date range
+        switch ($period) {
+            case 'week':
+                $date_filter = "created_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)";
+                break;
+            case 'month':
+                $date_filter = "created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)";
+                break;
+            case 'today':
+            default:
+                $date_filter = "DATE(created_at) = CURDATE()";
+                break;
+        }
+
+        $query = "
+            SELECT 
+                level,
+                COUNT(*) as count
+            FROM {$table_name} 
+            WHERE {$date_filter}
+            GROUP BY level
+            ORDER BY count DESC
+        ";
+
+        $results = $wpdb->get_results($query, ARRAY_A);
+        $statistics = array();
+
+        foreach ($results as $result) {
+            $statistics[$result['level']] = intval($result['count']);
+        }
+
+        return $statistics;
+    }
+
+    /**
+     * Clear all logs
+     *
+     * @since 1.0.0
+     * @param bool $files Clear log files
+     * @param bool $database Clear database logs
+     * @return bool Clear result
+     */
+    public static function clear_logs($files = true, $database = true)
+    {
+        $success = true;
+
+        // Clear log files
+        if ($files && is_dir(self::$log_dir)) {
+            $log_files = glob(self::$log_dir . '*.log*');
+            foreach ($log_files as $file) {
+                if (!unlink($file)) {
+                    $success = false;
+                }
+            }
+        }
+
+        // Clear database logs
+        if ($database && self::$db_logging) {
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'chatshop_logs';
+
+            $result = $wpdb->query("TRUNCATE TABLE {$table_name}");
+            if ($result === false) {
+                $success = false;
+            }
+        }
+
+        return $success;
+    }
+
+    /**
+     * Get client IP address
+     *
+     * @since 1.0.0
+     * @return string Client IP
+     */
+    private static function get_client_ip()
+    {
+        $ip_headers = array(
+            'HTTP_CF_CONNECTING_IP',
+            'HTTP_X_FORWARDED_FOR',
+            'HTTP_X_FORWARDED',
+            'HTTP_X_CLUSTER_CLIENT_IP',
+            'HTTP_FORWARDED_FOR',
+            'HTTP_FORWARDED',
+            'REMOTE_ADDR'
+        );
+
+        foreach ($ip_headers as $header) {
+            if (!empty($_SERVER[$header])) {
+                $ip = sanitize_text_field($_SERVER[$header]);
+
+                if (strpos($ip, ',') !== false) {
+                    $ip = trim(explode(',', $ip)[0]);
+                }
+
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $ip;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Set log level
+     *
+     * @since 1.0.0
+     * @param string $level Log level
+     * @return bool Update result
+     */
+    public static function set_log_level($level)
+    {
+        if (!isset(self::$log_levels[$level])) {
+            return false;
+        }
+
+        self::$current_level = self::$log_levels[$level];
+
+        // Update settings
+        $options = chatshop_get_option('general', '', array());
+        $options['log_level'] = self::$current_level;
+
+        return chatshop_update_option('general', '', $options);
+    }
+
+    /**
+     * Enable file logging
+     *
+     * @since 1.0.0
+     * @return bool Update result
+     */
+    public static function enable_file_logging()
+    {
+        self::$file_logging = true;
+        self::create_log_directory();
+
+        $options = chatshop_get_option('general', '', array());
+        $options['file_logging'] = true;
+
+        return chatshop_update_option('general', '', $options);
+    }
+
+    /**
+     * Disable file logging
+     *
+     * @since 1.0.0
+     * @return bool Update result
+     */
+    public static function disable_file_logging()
+    {
+        self::$file_logging = false;
+
+        $options = chatshop_get_option('general', '', array());
+        $options['file_logging'] = false;
+
+        return chatshop_update_option('general', '', $options);
+    }
+
+    /**
+     * Enable database logging
+     *
+     * @since 1.0.0
+     * @return bool Update result
+     */
+    public static function enable_database_logging()
+    {
+        self::$db_logging = true;
+
+        $options = chatshop_get_option('general', '', array());
+        $options['db_logging'] = true;
+
+        return chatshop_update_option('general', '', $options);
+    }
+
+    /**
+     * Disable database logging
+     *
+     * @since 1.0.0
+     * @return bool Update result
+     */
+    public static function disable_database_logging()
+    {
+        self::$db_logging = false;
+
+        $options = chatshop_get_option('general', '', array());
+        $options['db_logging'] = false;
+
+        return chatshop_update_option('general', '', $options);
+    }
+
+    /**
+     * Get log levels
+     *
+     * @since 1.0.0
+     * @return array Log levels
+     */
+    public static function get_log_levels()
+    {
+        return self::$log_levels;
+    }
+
+    /**
+     * Get current log level
+     *
+     * @since 1.0.0
+     * @return int Current log level
+     */
+    public static function get_current_level()
+    {
+        return self::$current_level;
+    }
+
+    /**
+     * Check if file logging is enabled
+     *
+     * @since 1.0.0
+     * @return bool File logging status
+     */
+    public static function is_file_logging_enabled()
+    {
+        return self::$file_logging;
+    }
+
+    /**
+     * Check if database logging is enabled
+     *
+     * @since 1.0.0
+     * @return bool Database logging status
+     */
+    public static function is_database_logging_enabled()
+    {
+        return self::$db_logging;
+    }
+
+    /**
+     * Get log directory
+     *
+     * @since 1.0.0
+     * @return string Log directory path
+     */
+    public static function get_log_directory()
+    {
+        return self::$log_dir;
     }
 }
 
 /**
- * Convenience function for logging
+ * Global logging function
  *
  * @since 1.0.0
  * @param string $message Log message
  * @param string $level Log level
- * @param array $context Additional context
+ * @param array  $context Additional context
  */
 function chatshop_log($message, $level = 'info', $context = array())
 {
