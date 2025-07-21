@@ -1,0 +1,515 @@
+/**
+ * Paystack Admin Settings CSS for ChatShop
+ *
+ * @package ChatShop
+ * @subpackage Admin\Assets
+ * @since 1.0.0
+ */
+
+/* ===================================
+   Settings Page Layout
+   =================================== */
+
+.chatshop-settings-wrapper {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.chatshop-settings-main {
+    flex: 2;
+    min-width: 0; /* Prevent flex item from overflowing */
+}
+
+.chatshop-settings-sidebar {
+    flex: 1;
+    max-width: 300px;
+}
+
+/* ===================================
+   Form Styling
+   =================================== */
+
+.chatshop-settings-main .form-table th {
+    width: 200px;
+    padding-left: 0;
+}
+
+.chatshop-settings-main .form-table td {
+    padding-right: 0;
+}
+
+.form-table input[type="text"],
+.form-table input[type="password"],
+.form-table select {
+    width: 100%;
+    max-width: 400px;
+}
+
+.form-table select[multiple] {
+    height: 120px;
+}
+
+/* ===================================
+   Status Indicators
+   =================================== */
+
+.notice.inline {
+    display: inline-block;
+    margin: 5px 0 15px;
+    padding: 5px 10px;
+    border-left: 4px solid;
+}
+
+.notice.inline.notice-success {
+    border-left-color: #00a32a;
+    background-color: #f0f6fc;
+}
+
+.notice.inline.notice-warning {
+    border-left-color: #dba617;
+    background-color: #fcf9e8;
+}
+
+.notice.inline.notice-error {
+    border-left-color: #d63638;
+    background-color: #fcf0f1;
+}
+
+.chatshop-connection-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.chatshop-connection-status::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.chatshop-connection-status.connected::before {
+    background-color: #00a32a;
+}
+
+.chatshop-connection-status.disconnected::before {
+    background-color: #d63638;
+}
+
+/* ===================================
+   Buttons
+   =================================== */
+
+#test-paystack-connection {
+    margin-left: 10px;
+    position: relative;
+}
+
+#test-paystack-connection:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.copy-webhook-url {
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
+.button.copied {
+    background-color: #00a32a;
+    border-color: #00a32a;
+    color: white;
+}
+
+/* ===================================
+   Sidebar Widgets
+   =================================== */
+
+.postbox {
+    margin-bottom: 20px;
+    border: 1px solid #c3c4c7;
+    background: #fff;
+    border-radius: 3px;
+}
+
+.postbox h3.hndle {
+    padding: 8px 12px;
+    margin: 0;
+    line-height: 1.4;
+    font-size: 14px;
+    background: #f6f7f7;
+    border-bottom: 1px solid #c3c4c7;
+    border-radius: 3px 3px 0 0;
+}
+
+.postbox .inside {
+    padding: 0 12px 12px;
+    line-height: 1.4;
+}
+
+.postbox .inside ol {
+    padding-left: 20px;
+}
+
+.postbox .inside ol li {
+    margin-bottom: 5px;
+}
+
+.postbox .inside p {
+    margin: 10px 0;
+}
+
+.postbox .inside a {
+    text-decoration: none;
+}
+
+.postbox .inside a:hover {
+    text-decoration: underline;
+}
+
+/* ===================================
+   Field-specific Styling
+   =================================== */
+
+.webhook-url-field {
+    position: relative;
+}
+
+.webhook-url-field input[readonly] {
+    background-color: #f6f7f7;
+    border: 1px solid #c3c4c7;
+    color: #646970;
+}
+
+.premium-field {
+    position: relative;
+}
+
+.premium-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.premium-field.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.premium-tooltip {
+    cursor: help;
+    border-bottom: 1px dotted #646970;
+}
+
+/* ===================================
+   Loading States
+   =================================== */
+
+.button.loading {
+    position: relative;
+    color: transparent;
+}
+
+.button.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
+    border: 2px solid #ffffff;
+    border-top: 2px solid transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: translate(-50%, -50%) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+/* ===================================
+   Validation Messages
+   =================================== */
+
+.chatshop-validation-errors ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+.chatshop-validation-errors li {
+    margin-bottom: 5px;
+    color: #d63638;
+}
+
+.field-error {
+    border-color: #d63638 !important;
+    box-shadow: 0 0 2px rgba(214, 54, 56, 0.8);
+}
+
+.field-error-message {
+    color: #d63638;
+    font-size: 12px;
+    margin-top: 5px;
+    display: block;
+}
+
+/* ===================================
+   Auto-save Indicators
+   =================================== */
+
+.chatshop-autosave-indicator {
+    color: #00a32a;
+    font-size: 12px;
+    margin-left: 10px;
+    opacity: 0;
+    animation: fadeIn 0.3s ease-in-out forwards;
+}
+
+@keyframes fadeIn {
+    to { opacity: 1; }
+}
+
+/* ===================================
+   Toggle Switches
+   =================================== */
+
+.chatshop-toggle {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.chatshop-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.chatshop-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: 0.4s;
+    border-radius: 34px;
+}
+
+.chatshop-toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: 0.4s;
+    border-radius: 50%;
+}
+
+.chatshop-toggle input:checked + .chatshop-toggle-slider {
+    background-color: #2196F3;
+}
+
+.chatshop-toggle input:checked + .chatshop-toggle-slider:before {
+    transform: translateX(26px);
+}
+
+/* ===================================
+   Currency Selection
+   =================================== */
+
+.currency-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.currency-item {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid #c3c4c7;
+    border-radius: 3px;
+    background: #f9f9f9;
+}
+
+.currency-item input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+.currency-item.selected {
+    background: #e7f3ff;
+    border-color: #0073aa;
+}
+
+/* ===================================
+   Payment Methods
+   =================================== */
+
+.payment-methods-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.payment-method-card {
+    padding: 12px;
+    border: 1px solid #c3c4c7;
+    border-radius: 5px;
+    background: #fff;
+    transition: all 0.2s ease;
+}
+
+.payment-method-card:hover {
+    border-color: #0073aa;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.payment-method-card.selected {
+    border-color: #0073aa;
+    background: #e7f3ff;
+}
+
+.payment-method-card input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+.payment-method-icon {
+    width: 24px;
+    height: 24px;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+/* ===================================
+   Responsive Design
+   =================================== */
+
+@media screen and (max-width: 782px) {
+    .chatshop-settings-wrapper {
+        flex-direction: column;
+    }
+    
+    .chatshop-settings-sidebar {
+        max-width: none;
+    }
+    
+    .form-table input[type="text"],
+    .form-table input[type="password"],
+    .form-table select {
+        max-width: none;
+    }
+    
+    .currency-grid,
+    .payment-methods-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media screen and (max-width: 600px) {
+    .notice.inline {
+        display: block;
+        margin: 10px 0;
+    }
+    
+    #test-paystack-connection {
+        margin-left: 0;
+        margin-top: 10px;
+        display: block;
+    }
+    
+    .copy-webhook-url {
+        margin-left: 0;
+        margin-top: 5px;
+        display: block;
+    }
+}
+
+/* ===================================
+   Accessibility Enhancements
+   =================================== */
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.chatshop-settings-main *:focus {
+    outline: 2px solid #0073aa;
+    outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .postbox {
+        border-width: 2px;
+    }
+    
+    .notice.inline {
+        border-left-width: 6px;
+    }
+    
+    .button {
+        border-width: 2px;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ===================================
+   Print Styles
+   =================================== */
+
+@media print {
+    .chatshop-settings-sidebar,
+    .button,
+    .notice {
+        display: none;
+    }
+    
+    .chatshop-settings-wrapper {
+        flex-direction: column;
+    }
+    
+    .form-table input[type="password"] {
+        color: transparent;
+        background: repeating-linear-gradient(
+            90deg,
+            #000 0,
+            #000 2px,
+            transparent 2px,
+            transparent 4px
+        );
+    }
+}

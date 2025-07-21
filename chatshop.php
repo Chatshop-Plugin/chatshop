@@ -117,6 +117,22 @@ final class ChatShop
     private $payment_manager;
 
     /**
+     * Registered payment gateways
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $registered_gateways = array();
+
+    /**
+     * Premium features status
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $premium_features = array();
+
+    /**
      * Main ChatShop Instance
      *
      * Ensures only one instance of ChatShop is loaded or can be loaded.
@@ -145,7 +161,9 @@ final class ChatShop
         $this->init_logger();
         $this->set_locale();
         $this->check_requirements();
+        $this->init_premium_features();
         $this->init_payment_system();
+        $this->register_payment_gateways();
         $this->define_admin_hooks();
         $this->define_public_hooks();
         $this->init_hooks();
@@ -211,8 +229,8 @@ final class ChatShop
             foreach ($gateway_dirs as $gateway_dir) {
                 $gateway_id = basename($gateway_dir);
                 $gateway_files = array(
-                    $gateway_dir . '/class-' . $gateway_id . '-gateway.php',
                     $gateway_dir . '/class-chatshop-' . $gateway_id . '-gateway.php',
+                    $gateway_dir . '/class-' . $gateway_id . '-gateway.php',
                 );
 
                 foreach ($gateway_files as $gateway_file) {
@@ -227,6 +245,48 @@ final class ChatShop
 
         // Allow plugins/themes to load additional gateways
         do_action('chatshop_load_payment_gateways');
+    }
+
+    /**
+     * Initialize premium features
+     *
+     * @since 1.0.0
+     */
+    private function init_premium_features()
+    {
+        $this->premium_features = array(
+            'multiple_gateways' => $this->is_feature_enabled('multiple_gateways'),
+            'advanced_analytics' => $this->is_feature_enabled('advanced_analytics'),
+            'abandoned_payment_recovery' => $this->is_feature_enabled('abandoned_payment_recovery'),
+            'multi_currency_support' => $this->is_feature_enabled('multi_currency_support'),
+            'whatsapp_automation' => $this->is_feature_enabled('whatsapp_automation'),
+            'custom_branding' => $this->is_feature_enabled('custom_branding'),
+        );
+
+        // Hook for premium feature initialization
+        do_action('chatshop_premium_features_init', $this->premium_features);
+    }
+
+    /**
+     * Check if a premium feature is enabled
+     *
+     * @param string $feature Feature name
+     * @return bool Whether feature is enabled
+     * @since 1.0.0
+     */
+    private function is_feature_enabled($feature)
+    {
+        $premium_options = get_option('chatshop_premium_options', array());
+        $license_status = get_option('chatshop_license_status', 'free');
+
+        // Free tier limitations
+        if ($license_status === 'free') {
+            $free_features = array('multiple_gateways');
+            return in_array($feature, $free_features, true);
+        }
+
+        // Premium tier - check individual feature toggles
+        return isset($premium_options[$feature]) ? (bool) $premium_options[$feature] : false;
     }
 
     /**
@@ -248,7 +308,7 @@ final class ChatShop
         }
 
         try {
-            // Initialize payment factory - Use fully qualified class name
+            // Initialize payment factory
             ChatShop_Payment_Factory::init();
 
             // Initialize payment manager
@@ -258,6 +318,131 @@ final class ChatShop
         } catch (\Exception $e) {
             chatshop_log('Payment system initialization failed: ' . $e->getMessage(), 'error');
             $this->payment_manager = null;
+        }
+    }
+
+    /**
+     * Register payment gateways
+     *
+     * @since 1.0.0
+     */
+    private function register_payment_gateways()
+    {
+        if (!$this->payment_manager) {
+            return;
+        }
+
+        // Register Paystack gateway
+        $this->register_paystack_gateway();
+
+        // Register additional gateways if premium feature is enabled
+        if ($this->premium_features['multiple_gateways']) {
+            $this->register_additional_gateways();
+        }
+
+        // Hook for custom gateway registration
+        do_action('chatshop_register_payment_gateways', $this->payment_manager);
+    }
+
+    /**
+     * Register Paystack gateway
+     *
+     * @since 1.0.0
+     */
+    private function register_paystack_gateway()
+    {
+        if (!class_exists('ChatShop\ChatShop_Paystack_Gateway')) {
+            return;
+        }
+
+        try {
+            $paystack_gateway = new ChatShop_Paystack_Gateway();
+
+            // Check if gateway is properly configured
+            if ($this->is_gateway_configured('paystack')) {
+                $this->payment_manager->register_gateway($paystack_gateway);
+                $this->registered_gateways['paystack'] = $paystack_gateway;
+
+                chatshop_log('Paystack gateway registered successfully', 'info');
+            } else {
+                chatshop_log('Paystack gateway not registered - configuration incomplete', 'warning');
+            }
+        } catch (\Exception $e) {
+            chatshop_log('Failed to register Paystack gateway: ' . $e->getMessage(), 'error');
+        }
+    }
+
+    /**
+     * Register additional premium gateways
+     *
+     * @since 1.0.0
+     */
+    private function register_additional_gateways()
+    {
+        $additional_gateways = array('paypal', 'flutterwave', 'razorpay');
+
+        foreach ($additional_gateways as $gateway_id) {
+            $this->register_gateway_by_id($gateway_id);
+        }
+    }
+
+    /**
+     * Register gateway by ID
+     *
+     * @param string $gateway_id Gateway identifier
+     * @since 1.0.0
+     */
+    private function register_gateway_by_id($gateway_id)
+    {
+        $class_name = 'ChatShop\ChatShop_' . ucfirst($gateway_id) . '_Gateway';
+
+        if (!class_exists($class_name)) {
+            return;
+        }
+
+        try {
+            $gateway = new $class_name();
+
+            if ($this->is_gateway_configured($gateway_id)) {
+                $this->payment_manager->register_gateway($gateway);
+                $this->registered_gateways[$gateway_id] = $gateway;
+
+                chatshop_log("Gateway {$gateway_id} registered successfully", 'info');
+            }
+        } catch (\Exception $e) {
+            chatshop_log("Failed to register {$gateway_id} gateway: " . $e->getMessage(), 'error');
+        }
+    }
+
+    /**
+     * Check if gateway is properly configured
+     *
+     * @param string $gateway_id Gateway identifier
+     * @return bool Whether gateway is configured
+     * @since 1.0.0
+     */
+    private function is_gateway_configured($gateway_id)
+    {
+        $options = chatshop_get_option($gateway_id, '', array());
+
+        // Check for required configuration
+        switch ($gateway_id) {
+            case 'paystack':
+                $test_key = isset($options['test_secret_key']) && !empty($options['test_secret_key']);
+                $live_key = isset($options['live_secret_key']) && !empty($options['live_secret_key']);
+                return $test_key || $live_key;
+
+            case 'paypal':
+                return isset($options['client_id']) && !empty($options['client_id']);
+
+            case 'flutterwave':
+                return isset($options['secret_key']) && !empty($options['secret_key']);
+
+            case 'razorpay':
+                return isset($options['key_id']) && !empty($options['key_id']);
+
+            default:
+                return false;
         }
     }
 
@@ -361,6 +546,10 @@ final class ChatShop
 
             // AJAX hooks for admin
             $this->loader->add_action('wp_ajax_chatshop_admin_action', $this->admin, 'handle_ajax_request');
+
+            // Gateway configuration hooks
+            $this->loader->add_action('wp_ajax_chatshop_test_gateway', $this, 'ajax_test_gateway');
+            $this->loader->add_action('wp_ajax_chatshop_save_gateway_settings', $this, 'ajax_save_gateway_settings');
         }
     }
 
@@ -404,6 +593,9 @@ final class ChatShop
         if ($this->payment_manager) {
             $this->loader->add_action('wp_loaded', $this, 'init_payment_hooks');
         }
+
+        // Premium feature hooks
+        $this->loader->add_action('chatshop_daily_cleanup', $this, 'process_premium_features');
     }
 
     /**
@@ -417,7 +609,7 @@ final class ChatShop
         $this->init_components();
 
         // Hook for extensions
-        do_action('chatshop_init');
+        do_action('chatshop_init', $this);
     }
 
     /**
@@ -503,6 +695,127 @@ final class ChatShop
     }
 
     /**
+     * Process premium features
+     *
+     * @since 1.0.0
+     */
+    public function process_premium_features()
+    {
+        // Process abandoned payment recovery
+        if ($this->premium_features['abandoned_payment_recovery']) {
+            foreach ($this->registered_gateways as $gateway) {
+                if (method_exists($gateway, 'process_abandoned_payments')) {
+                    $gateway->process_abandoned_payments();
+                }
+            }
+        }
+
+        // Process advanced analytics
+        if ($this->premium_features['advanced_analytics']) {
+            do_action('chatshop_process_analytics');
+        }
+    }
+
+    /**
+     * AJAX test gateway connection
+     *
+     * @since 1.0.0
+     */
+    public function ajax_test_gateway()
+    {
+        // Verify nonce and permissions
+        if (!wp_verify_nonce($_POST['nonce'], 'chatshop_admin_nonce') || !current_user_can('manage_options')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        $gateway_id = sanitize_key($_POST['gateway_id']);
+
+        if (!isset($this->registered_gateways[$gateway_id])) {
+            wp_send_json_error(__('Gateway not found', 'chatshop'));
+        }
+
+        $gateway = $this->registered_gateways[$gateway_id];
+
+        if (method_exists($gateway, 'test_connection')) {
+            $result = $gateway->test_connection();
+            wp_send_json($result);
+        }
+
+        wp_send_json_error(__('Test not supported for this gateway', 'chatshop'));
+    }
+
+    /**
+     * AJAX save gateway settings
+     *
+     * @since 1.0.0
+     */
+    public function ajax_save_gateway_settings()
+    {
+        // Verify nonce and permissions
+        if (!wp_verify_nonce($_POST['nonce'], 'chatshop_admin_nonce') || !current_user_can('manage_options')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        $gateway_id = sanitize_key($_POST['gateway_id']);
+        $settings = $_POST['settings'] ?? array();
+
+        // Sanitize and encrypt sensitive data
+        $sanitized_settings = $this->sanitize_gateway_settings($gateway_id, $settings);
+
+        // Save settings
+        $result = update_option("chatshop_{$gateway_id}_options", $sanitized_settings);
+
+        if ($result) {
+            wp_send_json_success(__('Settings saved successfully', 'chatshop'));
+        } else {
+            wp_send_json_error(__('Failed to save settings', 'chatshop'));
+        }
+    }
+
+    /**
+     * Sanitize gateway settings
+     *
+     * @param string $gateway_id Gateway ID
+     * @param array  $settings Settings array
+     * @return array Sanitized settings
+     * @since 1.0.0
+     */
+    private function sanitize_gateway_settings($gateway_id, $settings)
+    {
+        $sanitized = array();
+
+        foreach ($settings as $key => $value) {
+            $clean_key = sanitize_key($key);
+
+            // Encrypt sensitive keys
+            if (in_array($clean_key, array('secret_key', 'live_secret_key', 'test_secret_key'), true)) {
+                $sanitized[$clean_key] = $this->encrypt_api_key($value);
+            } else {
+                $sanitized[$clean_key] = sanitize_text_field($value);
+            }
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Encrypt API key
+     *
+     * @param string $key API key to encrypt
+     * @return string Encrypted key
+     * @since 1.0.0
+     */
+    private function encrypt_api_key($key)
+    {
+        if (empty($key)) {
+            return '';
+        }
+
+        $encryption_key = wp_salt('auth');
+        return openssl_encrypt($key, 'AES-256-CBC', $encryption_key, 0, substr($encryption_key, 0, 16));
+    }
+
+    /**
      * Run the loader to execute all hooks
      *
      * @since 1.0.0
@@ -565,6 +878,40 @@ final class ChatShop
     public function get_payment_manager()
     {
         return $this->payment_manager;
+    }
+
+    /**
+     * Get registered gateways
+     *
+     * @since 1.0.0
+     * @return array
+     */
+    public function get_registered_gateways()
+    {
+        return $this->registered_gateways;
+    }
+
+    /**
+     * Get premium features status
+     *
+     * @since 1.0.0
+     * @return array
+     */
+    public function get_premium_features()
+    {
+        return $this->premium_features;
+    }
+
+    /**
+     * Check if premium feature is available
+     *
+     * @param string $feature Feature name
+     * @return bool Whether feature is available
+     * @since 1.0.0
+     */
+    public function is_premium_feature_available($feature)
+    {
+        return isset($this->premium_features[$feature]) && $this->premium_features[$feature];
     }
 }
 
@@ -704,4 +1051,76 @@ function chatshop_get_payment_manager()
     }
 
     return $payment_manager;
+}
+
+/**
+ * Helper function to get registered payment gateways
+ *
+ * @since 1.0.0
+ * @return array
+ */
+function chatshop_get_payment_gateways()
+{
+    $plugin = ChatShop::instance();
+    return $plugin->get_registered_gateways();
+}
+
+/**
+ * Helper function to check if premium feature is available
+ *
+ * @since 1.0.0
+ * @param string $feature Feature name
+ * @return bool
+ */
+function chatshop_is_premium_feature_available($feature)
+{
+    $plugin = ChatShop::instance();
+    return $plugin->is_premium_feature_available($feature);
+}
+
+/**
+ * Helper function to process payment
+ *
+ * @since 1.0.0
+ * @param string $gateway_id Gateway ID
+ * @param float  $amount Payment amount
+ * @param string $currency Currency code
+ * @param array  $customer_data Customer information
+ * @param array  $options Additional options
+ * @return array Payment result
+ */
+function chatshop_process_payment($gateway_id, $amount, $currency, $customer_data, $options = array())
+{
+    $gateways = chatshop_get_payment_gateways();
+
+    if (!isset($gateways[$gateway_id])) {
+        return array(
+            'success' => false,
+            'message' => __('Payment gateway not found', 'chatshop'),
+        );
+    }
+
+    return $gateways[$gateway_id]->process_payment($amount, $currency, $customer_data, $options);
+}
+
+/**
+ * Helper function to verify payment
+ *
+ * @since 1.0.0
+ * @param string $gateway_id Gateway ID
+ * @param string $reference Transaction reference
+ * @return array Verification result
+ */
+function chatshop_verify_payment($gateway_id, $reference)
+{
+    $gateways = chatshop_get_payment_gateways();
+
+    if (!isset($gateways[$gateway_id])) {
+        return array(
+            'success' => false,
+            'message' => __('Payment gateway not found', 'chatshop'),
+        );
+    }
+
+    return $gateways[$gateway_id]->verify_transaction($reference);
 }
