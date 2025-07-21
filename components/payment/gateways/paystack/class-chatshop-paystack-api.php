@@ -1,11 +1,14 @@
 <?php
 
 /**
- * Paystack API Client for ChatShop
+ * Paystack API Client
  *
- * @package ChatShop
- * @subpackage Payment\Gateways\Paystack
- * @since 1.0.0
+ * Handles all Paystack API communications with proper error handling,
+ * caching, and security measures.
+ *
+ * @package    ChatShop
+ * @subpackage ChatShop/components/payment/gateways/paystack
+ * @since      1.0.0
  */
 
 namespace ChatShop;
@@ -16,121 +19,203 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * ChatShop Paystack API Client Class
- *
- * Handles all Paystack API communications with rate limiting,
- * webhook validation, and multi-currency support.
+ * Paystack API Client Class
  *
  * @since 1.0.0
  */
-class ChatShop_Paystack_API
+class ChatShop_Paystack_API extends ChatShop_Abstract_API_Client
 {
     /**
      * Paystack API base URL
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
-    private $base_url = 'https://api.paystack.co';
+    private $api_base = 'https://api.paystack.co';
 
     /**
-     * API secret key
+     * Secret key for API authentication
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
     private $secret_key;
 
     /**
-     * Rate limiting settings
+     * Public key for frontend usage
      *
-     * @var array
      * @since 1.0.0
+     * @var string
      */
-    private $rate_limits = array(
-        'requests_per_minute' => 60,
-        'burst_limit' => 10,
-    );
+    private $public_key;
 
     /**
-     * Request timeout in seconds
+     * Test mode flag
      *
-     * @var int
      * @since 1.0.0
+     * @var bool
      */
-    private $timeout = 30;
+    private $test_mode;
+
+    /**
+     * Cache timeout in seconds
+     *
+     * @since 1.0.0
+     * @var int
+     */
+    private $cache_timeout = 300; // 5 minutes
 
     /**
      * Constructor
      *
-     * @param string $secret_key Paystack secret key
      * @since 1.0.0
+     * @param array $config Configuration array
      */
-    public function __construct($secret_key)
+    public function __construct($config = array())
     {
-        $this->secret_key = sanitize_text_field($secret_key);
+        $options = chatshop_get_option('paystack', '', array());
+
+        $this->test_mode = isset($config['test_mode']) ? $config['test_mode'] : (isset($options['test_mode']) ? $options['test_mode'] : true);
+
+        $this->secret_key = $this->get_secret_key($options);
+        $this->public_key = $this->get_public_key($options);
+
+        if (empty($this->secret_key)) {
+            chatshop_log('Paystack API initialized without secret key', 'warning');
+        }
     }
 
     /**
-     * Initialize transaction
+     * Initialize a transaction
      *
-     * @param array $data Transaction data
-     * @return array API response
      * @since 1.0.0
+     * @param array $data Transaction data
+     * @return array|WP_Error API response or error
      */
     public function initialize_transaction($data)
     {
         $endpoint = '/transaction/initialize';
 
-        // Sanitize transaction data
+        // Validate required fields
+        $required = array('email', 'amount');
+        foreach ($required as $field) {
+            if (empty($data[$field])) {
+                return new \WP_Error(
+                    'missing_field',
+                    sprintf(__('Required field %s is missing', 'chatshop'), $field)
+                );
+            }
+        }
+
+        // Sanitize and prepare data
         $sanitized_data = $this->sanitize_transaction_data($data);
 
-        return $this->make_request('POST', $endpoint, $sanitized_data);
+        // Make API call
+        $response = $this->make_request('POST', $endpoint, $sanitized_data);
+
+        if (is_wp_error($response)) {
+            chatshop_log('Transaction initialization failed: ' . $response->get_error_message(), 'error');
+            return $response;
+        }
+
+        // Cache the transaction reference for verification
+        if (isset($response['data']['reference'])) {
+            $this->cache_transaction_data($response['data']['reference'], $sanitized_data);
+        }
+
+        return $response;
     }
 
     /**
-     * Verify transaction
+     * Verify a transaction
      *
-     * @param string $reference Transaction reference
-     * @return array API response
      * @since 1.0.0
+     * @param string $reference Transaction reference
+     * @return array|WP_Error API response or error
      */
     public function verify_transaction($reference)
     {
-        $reference = sanitize_text_field($reference);
-        $endpoint = "/transaction/verify/{$reference}";
+        if (empty($reference)) {
+            return new \WP_Error('missing_reference', __('Transaction reference is required', 'chatshop'));
+        }
 
-        return $this->make_request('GET', $endpoint);
+        $reference = sanitize_text_field($reference);
+        $endpoint = '/transaction/verify/' . $reference;
+
+        // Check cache first
+        $cache_key = 'chatshop_paystack_verify_' . md5($reference);
+        $cached_response = get_transient($cache_key);
+
+        if (
+            false !== $cached_response && isset($cached_response['data']['status']) &&
+            in_array($cached_response['data']['status'], array('success', 'failed', 'abandoned'), true)
+        ) {
+            return $cached_response;
+        }
+
+        $response = $this->make_request('GET', $endpoint);
+
+        if (is_wp_error($response)) {
+            chatshop_log('Transaction verification failed for reference: ' . $reference . ' - ' . $response->get_error_message(), 'error');
+            return $response;
+        }
+
+        // Cache successful responses for a short time
+        if (isset($response['data']['status'])) {
+            $cache_timeout = in_array($response['data']['status'], array('success', 'failed', 'abandoned'), true)
+                ? $this->cache_timeout : 60; // Cache final states longer
+            set_transient($cache_key, $response, $cache_timeout);
+        }
+
+        return $response;
     }
 
     /**
-     * Create payment request
+     * Create a payment request
      *
-     * @param array $data Payment request data
-     * @return array API response
      * @since 1.0.0
+     * @param array $data Payment request data
+     * @return array|WP_Error API response or error
      */
     public function create_payment_request($data)
     {
         $endpoint = '/paymentrequest';
 
-        // Sanitize payment request data
+        // Validate required fields
+        if (empty($data['customer']) && empty($data['description'])) {
+            return new \WP_Error(
+                'missing_data',
+                __('Customer or description is required for payment request', 'chatshop')
+            );
+        }
+
         $sanitized_data = $this->sanitize_payment_request_data($data);
 
-        return $this->make_request('POST', $endpoint, $sanitized_data);
+        $response = $this->make_request('POST', $endpoint, $sanitized_data);
+
+        if (is_wp_error($response)) {
+            chatshop_log('Payment request creation failed: ' . $response->get_error_message(), 'error');
+            return $response;
+        }
+
+        return $response;
     }
 
     /**
-     * Fetch payment request
+     * Get payment request details
      *
-     * @param string $id_or_code Payment request ID or code
-     * @return array API response
      * @since 1.0.0
+     * @param string $id_or_code Payment request ID or code
+     * @return array|WP_Error API response or error
      */
-    public function fetch_payment_request($id_or_code)
+    public function get_payment_request($id_or_code)
     {
+        if (empty($id_or_code)) {
+            return new \WP_Error('missing_id', __('Payment request ID or code is required', 'chatshop'));
+        }
+
         $id_or_code = sanitize_text_field($id_or_code);
-        $endpoint = "/paymentrequest/{$id_or_code}";
+        $endpoint = '/paymentrequest/' . $id_or_code;
 
         return $this->make_request('GET', $endpoint);
     }
@@ -138,234 +223,122 @@ class ChatShop_Paystack_API
     /**
      * Verify payment request
      *
-     * @param string $code Payment request code
-     * @return array API response
      * @since 1.0.0
+     * @param string $code Payment request code
+     * @return array|WP_Error API response or error
      */
     public function verify_payment_request($code)
     {
+        if (empty($code)) {
+            return new \WP_Error('missing_code', __('Payment request code is required', 'chatshop'));
+        }
+
         $code = sanitize_text_field($code);
-        $endpoint = "/paymentrequest/verify/{$code}";
+        $endpoint = '/paymentrequest/verify/' . $code;
 
         return $this->make_request('GET', $endpoint);
     }
 
     /**
-     * Send payment request notification
+     * Test API connection
      *
-     * @param string $code Payment request code
-     * @return array API response
      * @since 1.0.0
+     * @return array Connection test result
      */
-    public function notify_payment_request($code)
+    public function test_connection()
     {
-        $code = sanitize_text_field($code);
-        $endpoint = "/paymentrequest/notify/{$code}";
+        $response = $this->make_request('GET', '/transaction', array('perPage' => 1));
 
-        return $this->make_request('POST', $endpoint);
-    }
-
-    /**
-     * List supported banks
-     *
-     * @param string $currency Currency code
-     * @return array API response
-     * @since 1.0.0
-     */
-    public function list_banks($currency = 'NGN')
-    {
-        $currency = sanitize_text_field($currency);
-        $endpoint = "/bank?currency={$currency}";
-
-        return $this->make_request('GET', $endpoint);
-    }
-
-    /**
-     * Validate webhook signature
-     *
-     * @param array $payload Webhook payload
-     * @return bool Whether signature is valid
-     * @since 1.0.0
-     */
-    public function validate_webhook($payload)
-    {
-        $signature = $_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] ?? '';
-
-        if (empty($signature)) {
-            return false;
-        }
-
-        // Get raw payload
-        $raw_payload = file_get_contents('php://input');
-
-        // Compute expected signature
-        $expected_signature = hash_hmac('sha512', $raw_payload, $this->secret_key);
-
-        // Compare signatures
-        return hash_equals($expected_signature, $signature);
-    }
-
-    /**
-     * Validate webhook IP
-     *
-     * @return bool Whether IP is valid
-     * @since 1.0.0
-     */
-    public function validate_webhook_ip()
-    {
-        $allowed_ips = array(
-            '52.31.139.75',
-            '52.49.173.169',
-            '52.214.14.220',
-        );
-
-        $client_ip = $this->get_client_ip();
-
-        return in_array($client_ip, $allowed_ips, true);
-    }
-
-    /**
-     * Make API request with rate limiting
-     *
-     * @param string $method HTTP method
-     * @param string $endpoint API endpoint
-     * @param array  $data Request data
-     * @return array API response
-     * @since 1.0.0
-     */
-    private function make_request($method, $endpoint, $data = array())
-    {
-        try {
-            // Check rate limiting
-            if (!$this->check_rate_limit()) {
-                return $this->error_response(__('Rate limit exceeded. Please try again later.', 'chatshop'));
-            }
-
-            // Prepare request
-            $url = $this->base_url . $endpoint;
-            $args = $this->prepare_request_args($method, $data);
-
-            // Log request (exclude sensitive data)
-            $this->log_request($method, $endpoint, $this->sanitize_log_data($data));
-
-            // Make request
-            $response = wp_remote_request($url, $args);
-
-            // Handle response
-            return $this->handle_response($response, $endpoint);
-        } catch (\Exception $e) {
-            chatshop_log("Paystack API error for {$endpoint}: " . $e->getMessage(), 'error');
-            return $this->error_response(__('API request failed', 'chatshop'));
-        }
-    }
-
-    /**
-     * Prepare request arguments
-     *
-     * @param string $method HTTP method
-     * @param array  $data Request data
-     * @return array Request arguments
-     * @since 1.0.0
-     */
-    private function prepare_request_args($method, $data = array())
-    {
-        $args = array(
-            'method' => strtoupper($method),
-            'timeout' => $this->timeout,
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $this->secret_key,
-                'Content-Type' => 'application/json',
-                'User-Agent' => 'ChatShop/' . CHATSHOP_VERSION . ' (WordPress)',
-            ),
-            'sslverify' => true,
-        );
-
-        // Add body for POST/PUT requests
-        if (in_array($method, array('POST', 'PUT'), true) && !empty($data)) {
-            $args['body'] = wp_json_encode($data);
-        }
-
-        return $args;
-    }
-
-    /**
-     * Handle API response
-     *
-     * @param array|\WP_Error $response HTTP response
-     * @param string         $endpoint API endpoint
-     * @return array Processed response
-     * @since 1.0.0
-     */
-    private function handle_response($response, $endpoint)
-    {
-        // Check for HTTP errors
         if (is_wp_error($response)) {
-            chatshop_log("Paystack API HTTP error for {$endpoint}: " . $response->get_error_message(), 'error');
-            return $this->error_response(__('Network error occurred', 'chatshop'));
-        }
-
-        $status_code = wp_remote_retrieve_response_code($response);
-        $body = wp_remote_retrieve_body($response);
-
-        // Log response
-        $this->log_response($endpoint, $status_code, $body);
-
-        // Parse JSON response
-        $data = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            chatshop_log("Paystack API JSON error for {$endpoint}: " . json_last_error_msg(), 'error');
-            return $this->error_response(__('Invalid API response format', 'chatshop'));
-        }
-
-        // Handle different status codes
-        if ($status_code >= 200 && $status_code < 300) {
             return array(
-                'success' => true,
-                'data' => $data['data'] ?? $data,
-                'message' => $data['message'] ?? __('Request successful', 'chatshop'),
+                'success' => false,
+                'message' => $response->get_error_message()
             );
         }
 
-        // Handle API errors
-        $error_message = $data['message'] ?? __('API request failed', 'chatshop');
-        chatshop_log("Paystack API error {$status_code} for {$endpoint}: {$error_message}", 'error');
-
-        return $this->error_response($error_message);
+        return array(
+            'success' => true,
+            'message' => __('Connection successful', 'chatshop'),
+            'mode' => $this->test_mode ? __('Test Mode', 'chatshop') : __('Live Mode', 'chatshop')
+        );
     }
 
     /**
-     * Check rate limiting
+     * Make HTTP request to Paystack API
      *
-     * @return bool Whether request is allowed
      * @since 1.0.0
+     * @param string $method HTTP method
+     * @param string $endpoint API endpoint
+     * @param array  $data Request data
+     * @return array|WP_Error API response or error
      */
-    private function check_rate_limit()
+    private function make_request($method, $endpoint, $data = array())
     {
-        $transient_key = 'chatshop_paystack_rate_limit_' . md5($this->secret_key);
-        $current_count = get_transient($transient_key);
-
-        if ($current_count === false) {
-            // First request in this minute
-            set_transient($transient_key, 1, 60);
-            return true;
+        if (empty($this->secret_key)) {
+            return new \WP_Error('no_api_key', __('Paystack API key not configured', 'chatshop'));
         }
 
-        if ($current_count >= $this->rate_limits['requests_per_minute']) {
-            return false;
+        $url = $this->api_base . $endpoint;
+
+        $args = array(
+            'method'  => strtoupper($method),
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $this->secret_key,
+                'Content-Type'  => 'application/json',
+                'User-Agent'    => 'ChatShop/' . CHATSHOP_VERSION . ' (WordPress/' . get_bloginfo('version') . ')'
+            ),
+            'timeout' => 30,
+            'sslverify' => true
+        );
+
+        if (!empty($data) && in_array($method, array('POST', 'PUT', 'PATCH'), true)) {
+            $args['body'] = wp_json_encode($data);
+        } elseif (!empty($data) && $method === 'GET') {
+            $url = add_query_arg($data, $url);
         }
 
-        // Increment counter
-        set_transient($transient_key, $current_count + 1, 60);
-        return true;
+        $response = wp_remote_request($url, $args);
+
+        if (is_wp_error($response)) {
+            return new \WP_Error('api_error', $response->get_error_message());
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
+
+        if (empty($response_body)) {
+            return new \WP_Error('empty_response', __('Empty response from Paystack API', 'chatshop'));
+        }
+
+        $decoded_response = json_decode($response_body, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return new \WP_Error('invalid_json', __('Invalid JSON response from Paystack API', 'chatshop'));
+        }
+
+        // Handle API errors
+        if ($response_code >= 400) {
+            $error_message = isset($decoded_response['message'])
+                ? $decoded_response['message']
+                : __('Unknown API error', 'chatshop');
+
+            return new \WP_Error('api_error', $error_message, array('response_code' => $response_code));
+        }
+
+        // Log successful requests in debug mode
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            chatshop_log("Paystack API {$method} {$endpoint} - Response code: {$response_code}", 'debug');
+        }
+
+        return $decoded_response;
     }
 
     /**
      * Sanitize transaction data
      *
-     * @param array $data Transaction data
-     * @return array Sanitized data
      * @since 1.0.0
+     * @param array $data Raw transaction data
+     * @return array Sanitized data
      */
     private function sanitize_transaction_data($data)
     {
@@ -373,15 +346,15 @@ class ChatShop_Paystack_API
 
         // Required fields
         $sanitized['email'] = sanitize_email($data['email']);
-        $sanitized['amount'] = (int) $data['amount'];
+        $sanitized['amount'] = absint($data['amount']); // Amount in kobo/cents
 
         // Optional fields
-        if (!empty($data['currency'])) {
-            $sanitized['currency'] = sanitize_text_field($data['currency']);
-        }
-
         if (!empty($data['reference'])) {
             $sanitized['reference'] = sanitize_text_field($data['reference']);
+        }
+
+        if (!empty($data['currency'])) {
+            $sanitized['currency'] = sanitize_text_field($data['currency']);
         }
 
         if (!empty($data['callback_url'])) {
@@ -402,30 +375,24 @@ class ChatShop_Paystack_API
     /**
      * Sanitize payment request data
      *
-     * @param array $data Payment request data
-     * @return array Sanitized data
      * @since 1.0.0
+     * @param array $data Raw payment request data
+     * @return array Sanitized data
      */
     private function sanitize_payment_request_data($data)
     {
         $sanitized = array();
 
-        // Required fields
-        if (!empty($data['description'])) {
-            $sanitized['description'] = sanitize_textarea_field($data['description']);
+        if (!empty($data['customer'])) {
+            $sanitized['customer'] = sanitize_text_field($data['customer']);
         }
 
         if (!empty($data['amount'])) {
-            $sanitized['amount'] = (int) $data['amount'];
+            $sanitized['amount'] = absint($data['amount']);
         }
 
-        // Optional fields
-        if (!empty($data['currency'])) {
-            $sanitized['currency'] = sanitize_text_field($data['currency']);
-        }
-
-        if (!empty($data['customer'])) {
-            $sanitized['customer'] = sanitize_email($data['customer']);
+        if (!empty($data['description'])) {
+            $sanitized['description'] = sanitize_textarea_field($data['description']);
         }
 
         if (!empty($data['due_date'])) {
@@ -436,87 +403,15 @@ class ChatShop_Paystack_API
             $sanitized['line_items'] = $this->sanitize_line_items($data['line_items']);
         }
 
-        if (!empty($data['tax']) && is_array($data['tax'])) {
-            $sanitized['tax'] = $this->sanitize_tax_items($data['tax']);
-        }
-
-        if (!empty($data['metadata']) && is_array($data['metadata'])) {
-            $sanitized['metadata'] = $this->sanitize_metadata($data['metadata']);
-        }
-
-        return $sanitized;
-    }
-
-    /**
-     * Sanitize line items
-     *
-     * @param array $items Line items
-     * @return array Sanitized items
-     * @since 1.0.0
-     */
-    private function sanitize_line_items($items)
-    {
-        $sanitized = array();
-
-        foreach ($items as $item) {
-            if (is_array($item)) {
-                $sanitized_item = array();
-
-                if (!empty($item['name'])) {
-                    $sanitized_item['name'] = sanitize_text_field($item['name']);
-                }
-
-                if (!empty($item['amount'])) {
-                    $sanitized_item['amount'] = (int) $item['amount'];
-                }
-
-                if (!empty($item['quantity'])) {
-                    $sanitized_item['quantity'] = (int) $item['quantity'];
-                }
-
-                $sanitized[] = $sanitized_item;
-            }
-        }
-
-        return $sanitized;
-    }
-
-    /**
-     * Sanitize tax items
-     *
-     * @param array $items Tax items
-     * @return array Sanitized items
-     * @since 1.0.0
-     */
-    private function sanitize_tax_items($items)
-    {
-        $sanitized = array();
-
-        foreach ($items as $item) {
-            if (is_array($item)) {
-                $sanitized_item = array();
-
-                if (!empty($item['name'])) {
-                    $sanitized_item['name'] = sanitize_text_field($item['name']);
-                }
-
-                if (!empty($item['amount'])) {
-                    $sanitized_item['amount'] = (int) $item['amount'];
-                }
-
-                $sanitized[] = $sanitized_item;
-            }
-        }
-
         return $sanitized;
     }
 
     /**
      * Sanitize metadata
      *
-     * @param array $metadata Metadata array
-     * @return array Sanitized metadata
      * @since 1.0.0
+     * @param array $metadata Raw metadata
+     * @return array Sanitized metadata
      */
     private function sanitize_metadata($metadata)
     {
@@ -525,14 +420,10 @@ class ChatShop_Paystack_API
         foreach ($metadata as $key => $value) {
             $clean_key = sanitize_key($key);
 
-            if (is_string($value)) {
-                $sanitized[$clean_key] = sanitize_text_field($value);
-            } elseif (is_numeric($value)) {
-                $sanitized[$clean_key] = $value;
-            } elseif (is_bool($value)) {
-                $sanitized[$clean_key] = $value;
-            } elseif (is_array($value)) {
+            if (is_array($value)) {
                 $sanitized[$clean_key] = $this->sanitize_metadata($value);
+            } else {
+                $sanitized[$clean_key] = sanitize_text_field($value);
             }
         }
 
@@ -540,24 +431,37 @@ class ChatShop_Paystack_API
     }
 
     /**
-     * Sanitize data for logging (remove sensitive information)
+     * Sanitize line items
      *
-     * @param array $data Data to sanitize
-     * @return array Sanitized data
      * @since 1.0.0
+     * @param array $line_items Raw line items
+     * @return array Sanitized line items
      */
-    private function sanitize_log_data($data)
+    private function sanitize_line_items($line_items)
     {
-        if (!is_array($data)) {
-            return $data;
-        }
+        $sanitized = array();
 
-        $sensitive_keys = array('email', 'phone', 'card', 'authorization');
-        $sanitized = $data;
+        foreach ($line_items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
 
-        foreach ($sensitive_keys as $key) {
-            if (isset($sanitized[$key])) {
-                $sanitized[$key] = '[REDACTED]';
+            $clean_item = array();
+
+            if (!empty($item['name'])) {
+                $clean_item['name'] = sanitize_text_field($item['name']);
+            }
+
+            if (!empty($item['amount'])) {
+                $clean_item['amount'] = absint($item['amount']);
+            }
+
+            if (!empty($item['quantity'])) {
+                $clean_item['quantity'] = absint($item['quantity']);
+            }
+
+            if (!empty($clean_item)) {
+                $sanitized[] = $clean_item;
             }
         }
 
@@ -565,178 +469,88 @@ class ChatShop_Paystack_API
     }
 
     /**
-     * Log API request
+     * Get secret key based on mode
      *
-     * @param string $method HTTP method
-     * @param string $endpoint API endpoint
-     * @param array  $data Request data (sanitized)
      * @since 1.0.0
+     * @param array $options Plugin options
+     * @return string Decrypted secret key
      */
-    private function log_request($method, $endpoint, $data)
+    private function get_secret_key($options)
     {
-        if (!defined('WP_DEBUG') || !WP_DEBUG) {
-            return;
+        $key = $this->test_mode ? 'test_secret_key' : 'live_secret_key';
+
+        if (empty($options[$key])) {
+            return '';
         }
 
-        chatshop_log("Paystack API Request: {$method} {$endpoint} - Data: " . wp_json_encode($data), 'debug');
+        return $this->decrypt_api_key($options[$key]);
     }
 
     /**
-     * Log API response
+     * Get public key based on mode
      *
-     * @param string $endpoint API endpoint
-     * @param int    $status_code HTTP status code
-     * @param string $body Response body
      * @since 1.0.0
+     * @param array $options Plugin options
+     * @return string Public key
      */
-    private function log_response($endpoint, $status_code, $body)
+    private function get_public_key($options)
     {
-        if (!defined('WP_DEBUG') || !WP_DEBUG) {
-            return;
+        $key = $this->test_mode ? 'test_public_key' : 'live_public_key';
+
+        return isset($options[$key]) ? sanitize_text_field($options[$key]) : '';
+    }
+
+    /**
+     * Decrypt API key
+     *
+     * @since 1.0.0
+     * @param string $encrypted_key Encrypted API key
+     * @return string Decrypted key
+     */
+    private function decrypt_api_key($encrypted_key)
+    {
+        if (empty($encrypted_key)) {
+            return '';
         }
 
-        // Truncate long responses for logging
-        $log_body = strlen($body) > 500 ? substr($body, 0, 500) . '...' : $body;
+        $encryption_key = wp_salt('auth');
+        $decrypted = openssl_decrypt($encrypted_key, 'AES-256-CBC', $encryption_key, 0, substr($encryption_key, 0, 16));
 
-        chatshop_log("Paystack API Response: {$endpoint} - Status: {$status_code} - Body: {$log_body}", 'debug');
+        return $decrypted !== false ? $decrypted : '';
     }
 
     /**
-     * Get client IP address
+     * Cache transaction data for verification
      *
-     * @return string Client IP
      * @since 1.0.0
+     * @param string $reference Transaction reference
+     * @param array  $data Transaction data
      */
-    private function get_client_ip()
+    private function cache_transaction_data($reference, $data)
     {
-        $ip_headers = array(
-            'HTTP_CF_CONNECTING_IP',
-            'HTTP_X_FORWARDED_FOR',
-            'HTTP_X_FORWARDED',
-            'HTTP_X_CLUSTER_CLIENT_IP',
-            'HTTP_FORWARDED_FOR',
-            'HTTP_FORWARDED',
-            'REMOTE_ADDR',
-        );
-
-        foreach ($ip_headers as $header) {
-            if (!empty($_SERVER[$header])) {
-                $ip = sanitize_text_field($_SERVER[$header]);
-
-                // Handle comma-separated IPs
-                if (strpos($ip, ',') !== false) {
-                    $ip = trim(explode(',', $ip)[0]);
-                }
-
-                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                    return $ip;
-                }
-            }
-        }
-
-        return $_SERVER['REMOTE_ADDR'] ?? '';
+        $cache_key = 'chatshop_paystack_init_' . md5($reference);
+        set_transient($cache_key, $data, $this->cache_timeout);
     }
 
     /**
-     * Create error response
+     * Get public key for frontend
      *
-     * @param string $message Error message
-     * @return array Error response
      * @since 1.0.0
+     * @return string Public key
      */
-    private function error_response($message)
+    public function get_public_key_for_frontend()
     {
-        return array(
-            'success' => false,
-            'message' => $message,
-            'data' => null,
-        );
+        return $this->public_key;
     }
 
     /**
-     * Get supported currencies with minimum amounts
+     * Check if gateway is in test mode
      *
-     * @return array Currency information
      * @since 1.0.0
+     * @return bool Test mode status
      */
-    public function get_supported_currencies()
+    public function is_test_mode()
     {
-        return array(
-            'NGN' => array(
-                'name' => 'Nigerian Naira',
-                'symbol' => '₦',
-                'minimum' => 50.00,
-                'subunit' => 'kobo',
-            ),
-            'USD' => array(
-                'name' => 'US Dollar',
-                'symbol' => '$',
-                'minimum' => 2.00,
-                'subunit' => 'cent',
-            ),
-            'GHS' => array(
-                'name' => 'Ghanaian Cedi',
-                'symbol' => '₵',
-                'minimum' => 0.10,
-                'subunit' => 'pesewa',
-            ),
-            'ZAR' => array(
-                'name' => 'South African Rand',
-                'symbol' => 'R',
-                'minimum' => 1.00,
-                'subunit' => 'cent',
-            ),
-            'KES' => array(
-                'name' => 'Kenyan Shilling',
-                'symbol' => 'Ksh.',
-                'minimum' => 3.00,
-                'subunit' => 'cent',
-            ),
-            'XOF' => array(
-                'name' => 'West African CFA Franc',
-                'symbol' => 'XOF',
-                'minimum' => 1.00,
-                'subunit' => '',
-            ),
-        );
-    }
-
-    /**
-     * Format amount for display
-     *
-     * @param int    $amount Amount in subunits
-     * @param string $currency Currency code
-     * @return string Formatted amount
-     * @since 1.0.0
-     */
-    public function format_amount($amount, $currency)
-    {
-        $currencies = $this->get_supported_currencies();
-
-        if (!isset($currencies[$currency])) {
-            return $amount;
-        }
-
-        $symbol = $currencies[$currency]['symbol'];
-        $formatted_amount = number_format($amount / 100, 2);
-
-        return $symbol . $formatted_amount;
-    }
-
-    /**
-     * Get API status
-     *
-     * @return array API status information
-     * @since 1.0.0
-     */
-    public function get_api_status()
-    {
-        $response = $this->make_request('GET', '/bank');
-
-        return array(
-            'connected' => $response['success'],
-            'message' => $response['success'] ? __('API connection successful', 'chatshop') : $response['message'],
-            'timestamp' => current_time('mysql'),
-        );
+        return $this->test_mode;
     }
 }

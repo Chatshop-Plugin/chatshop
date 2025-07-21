@@ -1,12 +1,14 @@
 <?php
 
 /**
- * Abstract Payment Gateway Class
+ * Abstract Payment Gateway
  *
- * Base class for all payment gateway implementations.
+ * Base class for all payment gateways providing common functionality
+ * and enforcing implementation of required methods.
  *
- * @package ChatShop
- * @since 1.0.0
+ * @package    ChatShop
+ * @subpackage ChatShop/includes/abstracts
+ * @since      1.0.0
  */
 
 namespace ChatShop;
@@ -17,166 +19,153 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Abstract ChatShop Payment Gateway Class
+ * Abstract Payment Gateway Class
  *
  * @since 1.0.0
  */
-abstract class ChatShop_Payment_Gateway
+abstract class ChatShop_Abstract_Payment_Gateway
 {
     /**
      * Gateway ID
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
     protected $id;
 
     /**
      * Gateway name
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
     protected $name;
 
     /**
      * Gateway description
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
     protected $description;
 
     /**
-     * Gateway version
+     * Gateway enabled status
      *
-     * @var string
      * @since 1.0.0
-     */
-    protected $version = '1.0.0';
-
-    /**
-     * Supported features
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    protected $supports = array();
-
-    /**
-     * Supported countries
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    protected $supported_countries = array();
-
-    /**
-     * Supported currencies
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    protected $supported_currencies = array();
-
-    /**
-     * Gateway settings
-     *
-     * @var array
-     * @since 1.0.0
-     */
-    protected $settings = array();
-
-    /**
-     * Test mode flag
-     *
      * @var bool
-     * @since 1.0.0
-     */
-    protected $test_mode = false;
-
-    /**
-     * Gateway enabled flag
-     *
-     * @var bool
-     * @since 1.0.0
      */
     protected $enabled = false;
 
     /**
-     * API endpoint URLs
+     * Supported currencies
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
-    protected $api_endpoints = array();
+    protected $supported_currencies = array();
+
+    /**
+     * Supported countries
+     *
+     * @since 1.0.0
+     * @var array
+     */
+    protected $supported_countries = array();
+
+    /**
+     * Gateway version
+     *
+     * @since 1.0.0
+     * @var string
+     */
+    protected $version = '1.0.0';
 
     /**
      * Constructor
      *
      * @since 1.0.0
-     * @param string $gateway_id Gateway identifier
      */
-    public function __construct($gateway_id = '')
+    public function __construct()
     {
-        if (!empty($gateway_id)) {
-            $this->id = $gateway_id;
-        }
-
+        // Allow child classes to initialize
         $this->init();
-        $this->load_settings();
     }
 
     /**
      * Initialize gateway
      *
+     * Override this method in child classes for custom initialization
+     *
      * @since 1.0.0
      */
     protected function init()
     {
-        // Override in child classes
-    }
-
-    /**
-     * Load gateway settings
-     *
-     * @since 1.0.0
-     */
-    protected function load_settings()
-    {
-        $this->settings = get_option("chatshop_{$this->id}_settings", array());
-        $this->enabled = $this->get_setting('enabled', false);
-        $this->test_mode = $this->get_setting('test_mode', false);
+        // Default implementation - override in child classes
     }
 
     /**
      * Process payment
      *
      * @since 1.0.0
-     * @param float $amount Payment amount
+     * @param float  $amount Payment amount
      * @param string $currency Currency code
-     * @param array $customer_data Customer information
+     * @param array  $customer_data Customer information
+     * @param array  $options Additional options
      * @return array Payment result
      */
-    abstract public function process_payment($amount, $currency, $customer_data);
+    abstract public function process_payment($amount, $currency, $customer_data, $options = array());
 
     /**
      * Verify transaction
      *
      * @since 1.0.0
-     * @param string $transaction_id Transaction identifier
+     * @param string $reference Transaction reference
      * @return array Verification result
      */
-    abstract public function verify_transaction($transaction_id);
+    abstract public function verify_transaction($reference);
 
     /**
      * Handle webhook
      *
      * @since 1.0.0
      * @param array $payload Webhook payload
-     * @return bool True on success, false on failure
+     * @return bool Processing result
      */
     abstract public function handle_webhook($payload);
+
+    /**
+     * Generate payment link
+     *
+     * Optional method - default implementation returns error
+     *
+     * @since 1.0.0
+     * @param float  $amount Payment amount
+     * @param string $currency Currency code
+     * @param array  $customer_data Customer information
+     * @param array  $options Additional options
+     * @return array Payment link result
+     */
+    public function generate_payment_link($amount, $currency, $customer_data, $options = array())
+    {
+        return $this->error_response(__('Payment link generation not supported by this gateway', 'chatshop'));
+    }
+
+    /**
+     * Test connection
+     *
+     * Optional method - default implementation returns success
+     *
+     * @since 1.0.0
+     * @return array Test result
+     */
+    public function test_connection()
+    {
+        return array(
+            'success' => true,
+            'message' => __('Connection test not implemented', 'chatshop')
+        );
+    }
 
     /**
      * Get gateway ID
@@ -212,72 +201,14 @@ abstract class ChatShop_Payment_Gateway
     }
 
     /**
-     * Get gateway version
+     * Check if gateway is enabled
      *
      * @since 1.0.0
-     * @return string Gateway version
+     * @return bool Enabled status
      */
-    public function get_version()
+    public function is_enabled()
     {
-        return $this->version;
-    }
-
-    /**
-     * Check if gateway supports a feature
-     *
-     * @since 1.0.0
-     * @param string $feature Feature to check
-     * @return bool True if supported, false otherwise
-     */
-    public function supports($feature)
-    {
-        return in_array($feature, $this->supports);
-    }
-
-    /**
-     * Get supported features
-     *
-     * @since 1.0.0
-     * @return array Supported features
-     */
-    public function get_supported_features()
-    {
-        return $this->supports;
-    }
-
-    /**
-     * Check if gateway supports country
-     *
-     * @since 1.0.0
-     * @param string $country_code Country code
-     * @return bool True if supported, false otherwise
-     */
-    public function supports_country($country_code)
-    {
-        return empty($this->supported_countries) || in_array($country_code, $this->supported_countries);
-    }
-
-    /**
-     * Check if gateway supports currency
-     *
-     * @since 1.0.0
-     * @param string $currency_code Currency code
-     * @return bool True if supported, false otherwise
-     */
-    public function supports_currency($currency_code)
-    {
-        return empty($this->supported_currencies) || in_array($currency_code, $this->supported_currencies);
-    }
-
-    /**
-     * Get supported countries
-     *
-     * @since 1.0.0
-     * @return array Supported countries
-     */
-    public function get_supported_countries()
-    {
-        return $this->supported_countries;
+        return $this->enabled;
     }
 
     /**
@@ -292,269 +223,226 @@ abstract class ChatShop_Payment_Gateway
     }
 
     /**
-     * Check if gateway is enabled
+     * Get supported countries
      *
      * @since 1.0.0
-     * @return bool True if enabled, false otherwise
+     * @return array Supported countries
      */
-    public function is_enabled()
+    public function get_supported_countries()
     {
-        return $this->enabled;
+        return $this->supported_countries;
     }
 
     /**
-     * Check if in test mode
+     * Check if currency is supported
      *
      * @since 1.0.0
-     * @return bool True if in test mode, false otherwise
+     * @param string $currency Currency code
+     * @return bool Support status
      */
-    public function is_test_mode()
+    public function supports_currency($currency)
     {
-        return $this->test_mode;
+        return in_array(strtoupper($currency), $this->supported_currencies, true);
     }
 
     /**
-     * Get setting value
+     * Check if country is supported
      *
      * @since 1.0.0
-     * @param string $key Setting key
-     * @param mixed $default Default value
-     * @return mixed Setting value
+     * @param string $country Country code
+     * @return bool Support status
      */
-    public function get_setting($key, $default = null)
+    public function supports_country($country)
     {
-        return isset($this->settings[$key]) ? $this->settings[$key] : $default;
+        return in_array(strtoupper($country), $this->supported_countries, true);
     }
 
     /**
-     * Update setting value
+     * Get gateway version
      *
      * @since 1.0.0
-     * @param string $key Setting key
-     * @param mixed $value Setting value
-     * @return bool True on success, false on failure
+     * @return string Gateway version
      */
-    public function update_setting($key, $value)
+    public function get_version()
     {
-        $this->settings[$key] = $value;
-        return update_option("chatshop_{$this->id}_settings", $this->settings);
+        return $this->version;
     }
 
     /**
-     * Get all settings
+     * Format amount to gateway requirements
+     *
+     * Most gateways expect amounts in subunits (cents/kobo)
      *
      * @since 1.0.0
-     * @return array All settings
+     * @param float  $amount Amount in main units
+     * @param string $currency Currency code
+     * @return int Amount in subunits
      */
-    public function get_settings()
+    protected function format_amount($amount, $currency = 'NGN')
     {
-        return $this->settings;
-    }
-
-    /**
-     * Update multiple settings
-     *
-     * @since 1.0.0
-     * @param array $settings Settings array
-     * @return bool True on success, false on failure
-     */
-    public function update_settings($settings)
-    {
-        $this->settings = array_merge($this->settings, $settings);
-        return update_option("chatshop_{$this->id}_settings", $this->settings);
-    }
-
-    /**
-     * Get API endpoint URL
-     *
-     * @since 1.0.0
-     * @param string $endpoint Endpoint name
-     * @return string|false Endpoint URL or false if not found
-     */
-    protected function get_api_endpoint($endpoint)
-    {
-        return isset($this->api_endpoints[$endpoint]) ? $this->api_endpoints[$endpoint] : false;
-    }
-
-    /**
-     * Make API request
-     *
-     * @since 1.0.0
-     * @param string $endpoint Endpoint name or URL
-     * @param array $data Request data
-     * @param string $method HTTP method
-     * @param array $headers Additional headers
-     * @return array|false Response data or false on failure
-     */
-    protected function make_api_request($endpoint, $data = array(), $method = 'POST', $headers = array())
-    {
-        // Get full URL
-        $url = $this->get_api_endpoint($endpoint);
-        if (!$url) {
-            $url = $endpoint; // Assume it's a full URL
+        // Special handling for XOF (no subunit but still multiply by 100)
+        if (strtoupper($currency) === 'XOF') {
+            return intval($amount * 100);
         }
 
-        // Prepare request args
-        $args = array(
-            'method' => $method,
-            'headers' => array_merge($this->get_default_headers(), $headers),
-            'timeout' => 30
-        );
-
-        // Add body for POST/PUT requests
-        if (in_array($method, array('POST', 'PUT', 'PATCH'))) {
-            $args['body'] = $this->format_request_data($data);
-        } else if (!empty($data)) {
-            $url = add_query_arg($data, $url);
-        }
-
-        // Make request
-        $response = wp_remote_request($url, $args);
-
-        // Handle response
-        if (is_wp_error($response)) {
-            $this->log_error('API request failed: ' . $response->get_error_message());
-            return false;
-        }
-
-        $status_code = wp_remote_retrieve_response_code($response);
-        $body = wp_remote_retrieve_body($response);
-
-        // Log request for debugging
-        $this->log_api_request($url, $args, $status_code, $body);
-
-        // Parse response
-        $parsed_response = $this->parse_api_response($body, $status_code);
-
-        return $parsed_response;
+        // Standard conversion to subunits
+        return intval($amount * 100);
     }
 
     /**
-     * Get default API headers
+     * Format amount from gateway response
+     *
+     * Convert from subunits to main units
      *
      * @since 1.0.0
-     * @return array Default headers
+     * @param int    $amount Amount in subunits
+     * @param string $currency Currency code
+     * @return float Amount in main units
      */
-    protected function get_default_headers()
+    protected function unformat_amount($amount, $currency = 'NGN')
     {
-        return array(
-            'Content-Type' => 'application/json',
-            'Accept' => 'application/json',
-            'User-Agent' => 'ChatShop/' . CHATSHOP_VERSION
-        );
+        return floatval($amount / 100);
     }
 
     /**
-     * Format request data
+     * Validate required fields
      *
      * @since 1.0.0
-     * @param array $data Request data
-     * @return string Formatted data
+     * @param array $data Data to validate
+     * @param array $required_fields Required field names
+     * @return true|WP_Error Validation result
      */
-    protected function format_request_data($data)
+    protected function validate_required_fields($data, $required_fields)
     {
-        return wp_json_encode($data);
-    }
+        $missing_fields = array();
 
-    /**
-     * Parse API response
-     *
-     * @since 1.0.0
-     * @param string $body Response body
-     * @param int $status_code HTTP status code
-     * @return array|false Parsed response or false on failure
-     */
-    protected function parse_api_response($body, $status_code)
-    {
-        // Try to decode JSON
-        $decoded = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            $this->log_error('Invalid JSON response: ' . json_last_error_msg());
-            return false;
+        foreach ($required_fields as $field) {
+            if (empty($data[$field])) {
+                $missing_fields[] = $field;
+            }
         }
 
-        return array(
-            'status_code' => $status_code,
-            'data' => $decoded,
-            'success' => $status_code >= 200 && $status_code < 300
-        );
+        if (!empty($missing_fields)) {
+            return new \WP_Error(
+                'missing_fields',
+                sprintf(
+                    __('Required fields missing: %s', 'chatshop'),
+                    implode(', ', $missing_fields)
+                )
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * Sanitize customer data
+     *
+     * @since 1.0.0
+     * @param array $customer_data Raw customer data
+     * @return array Sanitized customer data
+     */
+    protected function sanitize_customer_data($customer_data)
+    {
+        $sanitized = array();
+
+        if (!empty($customer_data['email'])) {
+            $sanitized['email'] = sanitize_email($customer_data['email']);
+        }
+
+        if (!empty($customer_data['first_name'])) {
+            $sanitized['first_name'] = sanitize_text_field($customer_data['first_name']);
+        }
+
+        if (!empty($customer_data['last_name'])) {
+            $sanitized['last_name'] = sanitize_text_field($customer_data['last_name']);
+        }
+
+        if (!empty($customer_data['phone'])) {
+            $sanitized['phone'] = sanitize_text_field($customer_data['phone']);
+        }
+
+        if (!empty($customer_data['address'])) {
+            $sanitized['address'] = sanitize_textarea_field($customer_data['address']);
+        }
+
+        if (!empty($customer_data['city'])) {
+            $sanitized['city'] = sanitize_text_field($customer_data['city']);
+        }
+
+        if (!empty($customer_data['state'])) {
+            $sanitized['state'] = sanitize_text_field($customer_data['state']);
+        }
+
+        if (!empty($customer_data['country'])) {
+            $sanitized['country'] = sanitize_text_field($customer_data['country']);
+        }
+
+        if (!empty($customer_data['postal_code'])) {
+            $sanitized['postal_code'] = sanitize_text_field($customer_data['postal_code']);
+        }
+
+        return $sanitized;
     }
 
     /**
      * Generate transaction reference
      *
      * @since 1.0.0
+     * @param string $prefix Optional prefix
      * @return string Transaction reference
      */
-    protected function generate_reference()
+    protected function generate_reference($prefix = '')
     {
-        return strtoupper($this->id) . '_' . time() . '_' . wp_rand(1000, 9999);
+        if (empty($prefix)) {
+            $prefix = $this->id . '_';
+        }
+
+        $timestamp = time();
+        $random = wp_generate_password(8, false);
+
+        return $prefix . $timestamp . '_' . $random;
     }
 
     /**
-     * Validate webhook signature
+     * Log gateway activity
      *
      * @since 1.0.0
-     * @param array $payload Webhook payload
-     * @param string $signature Webhook signature
-     * @return bool True if valid, false otherwise
+     * @param string $message Log message
+     * @param string $level Log level
+     * @param array  $context Additional context
      */
-    protected function validate_webhook_signature($payload, $signature)
+    protected function log($message, $level = 'info', $context = array())
     {
-        // Override in child classes for specific validation
-        return true;
-    }
+        $log_message = sprintf('[%s] %s', strtoupper($this->id), $message);
 
-    /**
-     * Get webhook URL
-     *
-     * @since 1.0.0
-     * @return string Webhook URL
-     */
-    public function get_webhook_url()
-    {
-        return add_query_arg(array(
-            'action' => 'chatshop_payment_webhook',
-            'gateway' => $this->id
-        ), admin_url('admin-ajax.php'));
-    }
+        if (!empty($context)) {
+            $log_message .= ' Context: ' . wp_json_encode($context);
+        }
 
-    /**
-     * Format amount for API
-     *
-     * @since 1.0.0
-     * @param float $amount Amount
-     * @param string $currency Currency code
-     * @return int|float Formatted amount
-     */
-    protected function format_amount($amount, $currency)
-    {
-        // Most APIs expect amounts in the smallest currency unit (e.g., kobo for NGN)
-        $multipliers = array(
-            'NGN' => 100, // kobo
-            'USD' => 100, // cents
-            'EUR' => 100, // cents
-            'GBP' => 100, // pence
-        );
-
-        $multiplier = isset($multipliers[$currency]) ? $multipliers[$currency] : 100;
-        return intval($amount * $multiplier);
+        chatshop_log($log_message, $level);
     }
 
     /**
      * Create success response
      *
      * @since 1.0.0
-     * @param array $data Response data
+     * @param array  $data Response data
+     * @param string $message Success message
      * @return array Success response
      */
-    protected function success_response($data = array())
+    protected function success_response($data, $message = '')
     {
-        return array_merge(array(
+        if (empty($message)) {
+            $message = __('Operation completed successfully', 'chatshop');
+        }
+
+        return array(
             'success' => true,
-            'error' => false
-        ), $data);
+            'message' => $message,
+            'data' => $data,
+            'gateway' => $this->id
+        );
     }
 
     /**
@@ -562,115 +450,196 @@ abstract class ChatShop_Payment_Gateway
      *
      * @since 1.0.0
      * @param string $message Error message
-     * @param array $data Additional data
+     * @param string $code Error code
+     * @param array  $data Additional data
      * @return array Error response
      */
-    protected function error_response($message, $data = array())
+    protected function error_response($message, $code = 'gateway_error', $data = null)
     {
-        return array_merge(array(
+        // Log the error
+        $this->log('Error: ' . $message, 'error');
+
+        return array(
             'success' => false,
-            'error' => true,
-            'message' => $message
-        ), $data);
+            'message' => $message,
+            'error_code' => $code,
+            'data' => $data,
+            'gateway' => $this->id
+        );
     }
 
     /**
-     * Log API request for debugging
+     * Make HTTP request
+     *
+     * Helper method for making HTTP requests with common settings
      *
      * @since 1.0.0
      * @param string $url Request URL
-     * @param array $args Request arguments
-     * @param int $status_code Response status code
-     * @param string $body Response body
+     * @param array  $args Request arguments
+     * @return array|WP_Error Response or error
      */
-    protected function log_api_request($url, $args, $status_code, $body)
+    protected function make_http_request($url, $args = array())
     {
-        if (!$this->test_mode && !WP_DEBUG) {
-            return;
-        }
-
-        $log_data = array(
-            'gateway' => $this->id,
-            'url' => $url,
-            'method' => $args['method'],
-            'status_code' => $status_code,
-            'response_length' => strlen($body)
+        $default_args = array(
+            'timeout' => 30,
+            'sslverify' => true,
+            'user-agent' => 'ChatShop/' . CHATSHOP_VERSION . ' (WordPress/' . get_bloginfo('version') . ')'
         );
 
-        $this->log_info('API request: ' . wp_json_encode($log_data));
-    }
+        $args = wp_parse_args($args, $default_args);
 
-    /**
-     * Log error message
-     *
-     * @since 1.0.0
-     * @param string $message Error message
-     */
-    protected function log_error($message)
-    {
-        if (function_exists('chatshop_log')) {
-            chatshop_log("[{$this->id}] {$message}", 'error');
-        } else {
-            error_log("ChatShop Gateway [{$this->id}]: {$message}");
+        $response = wp_remote_request($url, $args);
+
+        if (is_wp_error($response)) {
+            return $response;
         }
-    }
 
-    /**
-     * Log info message
-     *
-     * @since 1.0.0
-     * @param string $message Info message
-     */
-    protected function log_info($message)
-    {
-        if (function_exists('chatshop_log')) {
-            chatshop_log("[{$this->id}] {$message}", 'info');
-        } else {
-            error_log("ChatShop Gateway [{$this->id}]: {$message}");
-        }
-    }
+        $response_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
 
-    /**
-     * Get gateway configuration for registration
-     *
-     * @since 1.0.0
-     * @return array Gateway configuration
-     */
-    public function get_gateway_config()
-    {
         return array(
-            'class_name' => get_class($this),
-            'name' => $this->name,
-            'description' => $this->description,
-            'version' => $this->version,
-            'supports' => $this->supports,
-            'countries' => $this->supported_countries,
-            'currencies' => $this->supported_currencies,
-            'enabled' => $this->enabled
+            'code' => $response_code,
+            'body' => $response_body,
+            'response' => $response
         );
     }
 
     /**
-     * Get admin settings fields
+     * Parse JSON response
      *
      * @since 1.0.0
-     * @return array Settings fields
+     * @param string $json_string JSON string
+     * @return array|WP_Error Parsed data or error
      */
-    public function get_admin_settings_fields()
+    protected function parse_json_response($json_string)
     {
-        return array(
-            'enabled' => array(
-                'title' => __('Enable/Disable', 'chatshop'),
-                'type' => 'checkbox',
-                'description' => sprintf(__('Enable %s', 'chatshop'), $this->name),
-                'default' => 'no'
-            ),
-            'test_mode' => array(
-                'title' => __('Test Mode', 'chatshop'),
-                'type' => 'checkbox',
-                'description' => __('Enable test mode for development', 'chatshop'),
-                'default' => 'yes'
-            )
+        if (empty($json_string)) {
+            return new \WP_Error('empty_response', __('Empty response received', 'chatshop'));
+        }
+
+        $decoded = json_decode($json_string, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return new \WP_Error(
+                'json_decode_error',
+                sprintf(__('JSON decode error: %s', 'chatshop'), json_last_error_msg())
+            );
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Get current timestamp
+     *
+     * @since 1.0.0
+     * @return string Current timestamp in MySQL format
+     */
+    protected function get_current_timestamp()
+    {
+        return current_time('mysql');
+    }
+
+    /**
+     * Get client IP address
+     *
+     * @since 1.0.0
+     * @return string Client IP address
+     */
+    protected function get_client_ip()
+    {
+        $ip_headers = array(
+            'HTTP_CF_CONNECTING_IP',
+            'HTTP_X_FORWARDED_FOR',
+            'HTTP_X_FORWARDED',
+            'HTTP_X_CLUSTER_CLIENT_IP',
+            'HTTP_FORWARDED_FOR',
+            'HTTP_FORWARDED',
+            'REMOTE_ADDR'
         );
+
+        foreach ($ip_headers as $header) {
+            if (!empty($_SERVER[$header])) {
+                $ip = sanitize_text_field($_SERVER[$header]);
+
+                // Handle comma-separated IPs
+                if (strpos($ip, ',') !== false) {
+                    $ip = trim(explode(',', $ip)[0]);
+                }
+
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $ip;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Encrypt sensitive data
+     *
+     * @since 1.0.0
+     * @param string $data Data to encrypt
+     * @return string Encrypted data
+     */
+    protected function encrypt_data($data)
+    {
+        if (empty($data)) {
+            return '';
+        }
+
+        $key = wp_salt('auth');
+        $encrypted = openssl_encrypt($data, 'AES-256-CBC', $key, 0, substr($key, 0, 16));
+
+        return $encrypted !== false ? $encrypted : '';
+    }
+
+    /**
+     * Decrypt sensitive data
+     *
+     * @since 1.0.0
+     * @param string $encrypted_data Encrypted data
+     * @return string Decrypted data
+     */
+    protected function decrypt_data($encrypted_data)
+    {
+        if (empty($encrypted_data)) {
+            return '';
+        }
+
+        $key = wp_salt('auth');
+        $decrypted = openssl_decrypt($encrypted_data, 'AES-256-CBC', $key, 0, substr($key, 0, 16));
+
+        return $decrypted !== false ? $decrypted : '';
+    }
+
+    /**
+     * Rate limit check
+     *
+     * Simple rate limiting implementation
+     *
+     * @since 1.0.0
+     * @param string $key Rate limit key
+     * @param int    $limit Number of requests allowed
+     * @param int    $window Time window in seconds
+     * @return bool Whether request is allowed
+     */
+    protected function check_rate_limit($key, $limit = 100, $window = 3600)
+    {
+        $cache_key = 'chatshop_rate_limit_' . md5($key);
+        $requests = get_transient($cache_key);
+
+        if ($requests === false) {
+            set_transient($cache_key, 1, $window);
+            return true;
+        }
+
+        if ($requests >= $limit) {
+            return false;
+        }
+
+        set_transient($cache_key, $requests + 1, $window);
+        return true;
     }
 }
