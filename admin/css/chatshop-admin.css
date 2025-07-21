@@ -1,382 +1,288 @@
 /**
- * Admin styles for ChatShop
+ * ChatShop Admin Styles
  *
  * @package ChatShop
  * @since 1.0.0
  */
 
-/* Dashboard Styles */
-.chatshop-dashboard-header {
-    background: #fff;
-    border: 1px solid #ccd0d4;
-    border-radius: 4px;
-    padding: 20px;
-    margin-bottom: 20px;
+/* ==========================================================================
+   General Admin Styles
+   ========================================================================== */
+
+.chatshop-admin {
+    margin: 20px 20px 0 2px;
 }
 
-.chatshop-welcome h2 {
-    margin: 0 0 10px;
-    color: #1d2327;
+.chatshop-admin h1 {
+    display: inline-block;
+    margin: 0 0 20px 0;
 }
 
-.chatshop-welcome p {
-    margin: 0;
-    color: #646970;
-    font-size: 14px;
-}
-
-.chatshop-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
+.chatshop-admin-header {
     margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #e1e1e1;
 }
 
-.chatshop-stat-card {
+.chatshop-admin-header .description {
+    font-size: 14px;
+    color: #666;
+    margin: 10px 0 0 0;
+}
+
+.chatshop-admin-section {
     background: #fff;
-    border: 1px solid #ccd0d4;
-    border-radius: 4px;
-    padding: 20px;
-    display: flex;
-    align-items: center;
-    transition: box-shadow 0.2s ease;
-}
-
-.chatshop-stat-card:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.stat-icon {
-    margin-right: 15px;
-}
-
-.stat-icon .dashicons {
-    font-size: 32px;
-    width: 32px;
-    height: 32px;
-    color: #2271b1;
-}
-
-.stat-icon.status-connected .dashicons {
-    color: #00a32a;
-}
-
-.stat-icon.status-disconnected .dashicons {
-    color: #d63638;
-}
-
-.stat-content h3 {
-    margin: 0 0 5px;
-    font-size: 24px;
-    font-weight: 600;
-    line-height: 1;
-}
-
-.stat-content p {
-    margin: 0;
-    color: #646970;
-    font-size: 13px;
-}
-
-.chatshop-dashboard-section {
-    background: #fff;
-    border: 1px solid #ccd0d4;
-    border-radius: 4px;
+    border: 1px solid #e1e1e1;
+    border-radius: 5px;
     padding: 20px;
     margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
-.chatshop-dashboard-section h2 {
+.chatshop-admin-section h2 {
+    margin: 0 0 20px 0;
+    padding: 0 0 10px 0;
+    border-bottom: 1px solid #f1f1f1;
+    font-size: 18px;
+    color: #333;
+}
+
+.chatshop-admin-section h3 {
+    margin: 20px 0 15px 0;
+    font-size: 16px;
+    color: #444;
+}
+
+.chatshop-admin-section:first-child {
     margin-top: 0;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #f0f0f1;
 }
 
-.chatshop-setup-checklist .setup-item {
-    display: flex;
-    align-items: flex-start;
-    padding: 15px 0;
-    border-bottom: 1px solid #f0f0f1;
-}
+/* ==========================================================================
+   Status Indicators
+   ========================================================================== */
 
-.chatshop-setup-checklist .setup-item:last-child {
-    border-bottom: none;
-}
-
-.setup-icon {
-    font-size: 20px;
-    font-weight: bold;
-    width: 30px;
-    margin-right: 15px;
-    margin-top: 5px;
-    text-align: center;
-}
-
-.setup-item.completed .setup-icon {
-    color: #00a32a;
-}
-
-.setup-item.pending .setup-icon {
-    color: #dcdcde;
-}
-
-.setup-content h4 {
-    margin: 0 0 5px;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.setup-content p {
-    margin: 0 0 10px;
-    color: #646970;
-    font-size: 13px;
-}
-
-.chatshop-dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-bottom: 20px;
-}
-
-.chatshop-dashboard-widget {
-    background: #fff;
-    border: 1px solid #ccd0d4;
-    border-radius: 4px;
-    overflow: hidden;
-}
-
-.chatshop-dashboard-widget h3 {
-    margin: 0;
-    padding: 15px 20px;
-    background: #f6f7f7;
-    border-bottom: 1px solid #ccd0d4;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.widget-content {
-    padding: 20px;
-}
-
-.no-data {
-    color: #646970;
-    font-style: italic;
-    text-align: center;
-    margin: 0;
-    padding: 20px;
-}
-
-.quick-actions {
-    display: grid;
-    gap: 10px;
-}
-
-.quick-action {
-    display: flex;
-    align-items: center;
-    padding: 12px;
-    text-decoration: none;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    transition: all 0.2s ease;
-    color: #2c3338;
-}
-
-.quick-action:hover {
-    background: #f6f7f7;
-    text-decoration: none;
-    border-color: #2271b1;
-}
-
-.quick-action .dashicons {
-    margin-right: 10px;
-    color: #2271b1;
-}
-
-.chatshop-help-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 20px;
-}
-
-.help-card {
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    padding: 20px;
-    background: #fff;
-}
-
-.help-card h4 {
-    margin: 0 0 10px;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.help-card p {
-    margin: 0 0 15px;
-    color: #646970;
-    font-size: 13px;
-}
-
-/* Form Styles */
-.chatshop-form-section {
-    background: #fff;
-    border: 1px solid #ccd0d4;
-    margin-bottom: 20px;
-}
-
-.chatshop-form-section h3 {
-    margin: 0;
-    padding: 15px 20px;
-    background: #f6f7f7;
-    border-bottom: 1px solid #ccd0d4;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.chatshop-form-section .form-table {
-    margin: 0;
-}
-
-.chatshop-form-section .form-table th {
-    width: 200px;
-    padding: 20px;
-}
-
-.chatshop-form-section .form-table td {
-    padding: 20px;
-}
-
-/* Status Indicators */
 .chatshop-status {
-    display: inline-flex;
-    align-items: center;
+    display: inline-block;
     padding: 4px 8px;
     border-radius: 3px;
     font-size: 12px;
     font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
-.chatshop-status.status-connected {
-    background: #d1e7dd;
-    color: #0a3622;
+.chatshop-status-enabled {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
 }
 
-.chatshop-status.status-disconnected {
-    background: #f8d7da;
+.chatshop-status-disabled {
+    background-color: #f8d7da;
     color: #721c24;
+    border: 1px solid #f5c6cb;
 }
 
-.chatshop-status.status-pending {
-    background: #fff3cd;
-    color: #664d03;
+.chatshop-status-test {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
 }
 
-/* Buttons */
-.chatshop-button {
-    background: #2271b1;
-    border: 1px solid #2271b1;
-    color: #fff;
-    padding: 8px 16px;
-    border-radius: 3px;
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-block;
-    transition: all 0.2s ease;
+.chatshop-status-live {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
 }
 
-.chatshop-button:hover {
-    background: #135e96;
-    border-color: #135e96;
-    color: #fff;
-    text-decoration: none;
+.chatshop-status-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
 }
 
-.chatshop-button.secondary {
-    background: #f6f7f7;
-    border-color: #dcdcde;
-    color: #2c3338;
+.chatshop-status-failed {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
 }
 
-.chatshop-button.secondary:hover {
-    background: #f0f0f1;
-    border-color: #8c8f94;
+.chatshop-status-pending {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
 }
 
-.chatshop-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+/* ==========================================================================
+   Payment Settings
+   ========================================================================== */
+
+.chatshop-payment-settings .wp-list-table {
+    margin-top: 0;
 }
 
-/* Tables */
-.chatshop-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: #fff;
+.chatshop-gateway-config {
+    margin-top: 30px;
+    padding-top: 30px;
+    border-top: 2px solid #f1f1f1;
 }
 
-.chatshop-table th,
-.chatshop-table td {
-    padding: 12px;
-    text-align: left;
-    border-bottom: 1px solid #f0f0f1;
+.chatshop-gateway-form .form-table {
+    margin-top: 20px;
 }
 
-.chatshop-table th {
-    background: #f6f7f7;
-    font-weight: 600;
-    color: #1d2327;
-}
-
-.chatshop-table tr:hover {
-    background: #f6f7f7;
-}
-
-/* Notices */
-.chatshop-notice {
-    padding: 12px;
+.chatshop-gateway-webhook-info {
+    background: #f9f9f9;
+    border: 1px solid #e1e1e1;
+    border-radius: 5px;
+    padding: 15px;
     margin: 20px 0;
-    border-left: 4px solid;
+}
+
+.chatshop-gateway-webhook-info h4 {
+    margin: 0 0 10px 0;
+    color: #333;
+}
+
+.chatshop-webhook-url {
+    display: block;
     background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 10px;
+    margin: 10px 0;
+    font-family: monospace;
+    font-size: 13px;
+    word-break: break-all;
+    color: #333;
 }
 
-.chatshop-notice.notice-success {
-    border-left-color: #00a32a;
-    background: #f0f6fc;
+.chatshop-copy-webhook {
+    margin-left: 10px;
+    vertical-align: top;
 }
 
-.chatshop-notice.notice-error {
-    border-left-color: #d63638;
-    background: #fcf0f1;
+/* ==========================================================================
+   Premium Notice
+   ========================================================================== */
+
+.chatshop-premium-notice {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    padding: 20px;
 }
 
-.chatshop-notice.notice-warning {
-    border-left-color: #dba617;
-    background: #fcf9e8;
+.chatshop-premium-notice h2 {
+    color: #fff;
+    margin: 0 0 15px 0;
+    border: none;
+    padding: 0;
 }
 
-.chatshop-notice.notice-info {
-    border-left-color: #72aee6;
-    background: #f0f6fc;
+.chatshop-premium-notice ul {
+    margin: 15px 0;
+    padding-left: 20px;
 }
 
-/* Loading States */
-.chatshop-loading {
-    opacity: 0.6;
-    pointer-events: none;
+.chatshop-premium-notice li {
+    margin: 5px 0;
+    color: rgba(255,255,255,0.9);
 }
 
-.chatshop-spinner {
+.chatshop-premium-notice .button-primary {
+    background: #fff;
+    color: #667eea;
+    border: none;
+    font-weight: 600;
+}
+
+.chatshop-premium-notice .button-primary:hover {
+    background: #f8f9fa;
+    color: #5a6fd8;
+}
+
+/* ==========================================================================
+   Modals
+   ========================================================================== */
+
+.chatshop-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.chatshop-modal-content {
+    background: #fff;
+    border-radius: 8px;
+    min-width: 400px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow: auto;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+}
+
+.chatshop-modal-header {
+    padding: 20px 20px 0 20px;
+    border-bottom: 1px solid #e1e1e1;
+    position: relative;
+}
+
+.chatshop-modal-header h3 {
+    margin: 0 30px 20px 0;
+    font-size: 18px;
+    color: #333;
+}
+
+.chatshop-modal-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.chatshop-modal-close:hover {
+    color: #333;
+}
+
+.chatshop-modal-body {
+    padding: 20px;
+}
+
+.chatshop-test-loading {
+    text-align: center;
+    padding: 20px;
+}
+
+.chatshop-test-loading::before {
+    content: '';
     display: inline-block;
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     border: 2px solid #f3f3f3;
-    border-top: 2px solid #2271b1;
+    border-top: 2px solid #3498db;
     border-radius: 50%;
     animation: chatshop-spin 1s linear infinite;
-    margin-right: 8px;
+    margin-right: 10px;
+    vertical-align: middle;
 }
 
 @keyframes chatshop-spin {
@@ -384,173 +290,229 @@
     100% { transform: rotate(360deg); }
 }
 
-/* Responsive Design */
-@media (max-width: 1024px) {
-    .chatshop-dashboard-grid {
-        grid-template-columns: 1fr;
-    }
+/* ==========================================================================
+   Forms
+   ========================================================================== */
+
+.chatshop-admin .form-table th {
+    width: 200px;
+    padding: 15px 10px 15px 0;
+    vertical-align: top;
 }
 
-@media (max-width: 768px) {
-    .chatshop-stats-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .chatshop-help-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .chatshop-stat-card {
-        flex-direction: column;
-        text-align: center;
-    }
-    
-    .stat-icon {
-        margin-right: 0;
-        margin-bottom: 10px;
-    }
+.chatshop-admin .form-table td {
+    padding: 15px 0;
+    vertical-align: top;
 }
 
-/* Admin Menu Icon */
-#adminmenu .dashicons-whatsapp:before {
-    content: "\f123";
-    font-family: dashicons;
-}
-
-/* Color Picker Customization */
-.wp-picker-container .wp-color-result {
-    height: 30px;
-}
-
-/* Settings Tabs */
-.chatshop-tabs {
-    margin-bottom: 20px;
-}
-
-.chatshop-tabs .nav-tab {
-    margin-right: 10px;
-}
-
-.chatshop-tab-content {
-    display: none;
-}
-
-.chatshop-tab-content.active {
+.chatshop-admin .form-table .description {
+    color: #666;
+    font-style: italic;
+    margin-top: 5px;
     display: block;
 }
 
-/* Connection Status */
-.chatshop-connection-status {
-    display: flex;
-    align-items: center;
-    margin-bottom: 15px;
+.chatshop-admin .regular-text,
+.chatshop-admin .large-text {
+    width: 400px;
+    max-width: 100%;
 }
 
-.chatshop-connection-status .status-indicator {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    margin-right: 8px;
+.chatshop-admin .large-text {
+    width: 500px;
 }
 
-.chatshop-connection-status .status-indicator.connected {
-    background: #00a32a;
+/* ==========================================================================
+   Dashboard Widgets
+   ========================================================================== */
+
+.chatshop-dashboard-widgets {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
 }
 
-.chatshop-connection-status .status-indicator.disconnected {
-    background: #d63638;
-}
-
-.chatshop-connection-status .status-indicator.testing {
-    background: #dba617;
-    animation: chatshop-pulse 1s infinite;
-}
-
-@keyframes chatshop-pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-}
-
-/* Progress Bars */
-.chatshop-progress {
-    width: 100%;
-    height: 20px;
-    background: #f0f0f1;
-    border-radius: 10px;
-    overflow: hidden;
-}
-
-.chatshop-progress-bar {
-    height: 100%;
-    background: linear-gradient(90deg, #2271b1, #72aee6);
-    transition: width 0.3s ease;
-}
-
-/* Modal Styles */
-.chatshop-modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 100000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.chatshop-modal {
+.chatshop-widget {
     background: #fff;
-    border-radius: 4px;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
     padding: 20px;
-    max-width: 500px;
-    width: 90%;
-    max-height: 80vh;
-    overflow-y: auto;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.chatshop-modal-header {
+.chatshop-widget h3 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 16px;
+}
+
+.chatshop-widget-stat {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #f0f0f1;
+    padding: 10px 0;
+    border-bottom: 1px solid #f1f1f1;
 }
 
-.chatshop-modal-title {
-    margin: 0;
-    font-size: 18px;
+.chatshop-widget-stat:last-child {
+    border-bottom: none;
+}
+
+.chatshop-widget-stat-label {
+    color: #666;
+    font-size: 14px;
+}
+
+.chatshop-widget-stat-value {
     font-weight: 600;
+    font-size: 18px;
+    color: #333;
 }
 
-.chatshop-modal-close {
-    background: none;
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-    color: #646970;
-    padding: 0;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+/* ==========================================================================
+   Responsive Design
+   ========================================================================== */
+
+@media (max-width: 782px) {
+    .chatshop-admin {
+        margin: 10px 10px 0 10px;
+    }
+    
+    .chatshop-dashboard-widgets {
+        grid-template-columns: 1fr;
+    }
+    
+    .chatshop-admin .regular-text,
+    .chatshop-admin .large-text {
+        width: 100%;
+    }
+    
+    .chatshop-modal-content {
+        min-width: 90%;
+        margin: 20px;
+    }
+    
+    .wp-list-table .column-primary {
+        width: 100%;
+    }
+    
+    .chatshop-webhook-url {
+        font-size: 11px;
+    }
 }
 
-.chatshop-modal-close:hover {
-    color: #d63638;
+@media (max-width: 480px) {
+    .chatshop-admin-section {
+        padding: 15px;
+    }
+    
+    .chatshop-widget {
+        padding: 15px;
+    }
+    
+    .chatshop-gateway-webhook-info {
+        padding: 10px;
+    }
 }
 
-.chatshop-modal-footer {
-    margin-top: 20px;
-    padding-top: 20px;
-    border-top: 1px solid #f0f0f1;
+/* ==========================================================================
+   WordPress Core Compatibility
+   ========================================================================== */
+
+.chatshop-admin .wp-core-ui .button-primary {
+    background: #007cba;
+    border-color: #007cba;
+}
+
+.chatshop-admin .wp-core-ui .button-primary:hover {
+    background: #005a87;
+    border-color: #005a87;
+}
+
+.chatshop-admin .notice {
+    margin: 20px 0;
+}
+
+.chatshop-admin .notice.inline {
+    margin: 10px 0;
+    display: block;
+}
+
+/* ==========================================================================
+   Animation Classes
+   ========================================================================== */
+
+.chatshop-fade-in {
+    animation: chatshop-fadeIn 0.3s ease-in;
+}
+
+@keyframes chatshop-fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chatshop-slide-in {
+    animation: chatshop-slideIn 0.3s ease-out;
+}
+
+@keyframes chatshop-slideIn {
+    from {
+        transform: translateX(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* ==========================================================================
+   Utility Classes
+   ========================================================================== */
+
+.chatshop-text-center {
+    text-align: center;
+}
+
+.chatshop-text-right {
     text-align: right;
 }
 
-.chatshop-modal-footer .button {
-    margin-left: 10px;
+.chatshop-mb-0 {
+    margin-bottom: 0 !important;
+}
+
+.chatshop-mt-20 {
+    margin-top: 20px !important;
+}
+
+.chatshop-p-20 {
+    padding: 20px !important;
+}
+
+.chatshop-hidden {
+    display: none !important;
+}
+
+.chatshop-flex {
+    display: flex;
+}
+
+.chatshop-flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chatshop-flex-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
