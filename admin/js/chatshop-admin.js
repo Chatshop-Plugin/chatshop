@@ -1,593 +1,537 @@
 /**
- * Admin JavaScript for ChatShop
+ * ChatShop Admin JavaScript
  *
  * @package ChatShop
- * @since 1.0.0
+ * @since   1.0.0
  */
 
 (function($) {
     'use strict';
 
-    // Main ChatShop Admin object
-    window.ChatShopAdmin = {
+    /**
+     * ChatShop Admin Object
+     */
+    const ChatShopAdmin = {
         
+        /**
+         * Initialize admin functionality
+         */
         init: function() {
             this.bindEvents();
-            this.initColorPicker();
-            this.initTabs();
             this.initTooltips();
-            this.checkConnectionStatus();
+            this.initFormValidation();
         },
 
+        /**
+         * Bind admin events
+         */
         bindEvents: function() {
-            // Test connection buttons
-            $(document).on('click', '.chatshop-test-connection', this.testConnection);
+            // Test mode toggle
+            $(document).on('change', '#paystack_test_mode', this.toggleTestMode);
             
-            // Settings form submission
-            $(document).on('submit', '.chatshop-settings-form', this.saveSettings);
+            // Copy webhook URL
+            $(document).on('click', '#copy-webhook-url', this.copyWebhookUrl);
             
-            // Modal triggers
-            $(document).on('click', '[data-chatshop-modal]', this.openModal);
-            $(document).on('click', '.chatshop-modal-close, .chatshop-modal-overlay', this.closeModal);
+            // Test gateway connection
+            $(document).on('click', '#test-paystack-connection', this.testGatewayConnection);
             
-            // Tab navigation
-            $(document).on('click', '.chatshop-tab', this.switchTab);
+            // Save settings via AJAX
+            $(document).on('click', '.chatshop-save-settings', this.saveSettings);
             
-            // AJAX form submissions
-            $(document).on('submit', '.chatshop-ajax-form', this.handleAjaxForm);
+            // Reset settings
+            $(document).on('click', '.chatshop-reset-settings', this.resetSettings);
             
-            // Copy to clipboard
-            $(document).on('click', '.chatshop-copy-btn', this.copyToClipboard);
+            // Form changes tracking
+            $(document).on('change', '.chatshop-setting-field', this.trackFormChanges);
             
-            // Refresh data
-            $(document).on('click', '.chatshop-refresh-data', this.refreshData);
+            // API key validation
+            $(document).on('blur', 'input[name*="_key"]', this.validateApiKey);
+            
+            // Dismiss notices
+            $(document).on('click', '.notice-dismiss', this.dismissNotice);
         },
 
-        initColorPicker: function() {
-            if ($.fn.wpColorPicker) {
-                $('.chatshop-color-picker').wpColorPicker();
+        /**
+         * Toggle test mode sections
+         */
+        toggleTestMode: function() {
+            const isTestMode = $(this).is(':checked');
+            
+            if (isTestMode) {
+                $('#test-keys-section').slideDown(300);
+                $('#live-keys-section').slideUp(300);
+            } else {
+                $('#test-keys-section').slideUp(300);
+                $('#live-keys-section').slideDown(300);
             }
         },
 
-        initTabs: function() {
-            // Set first tab as active if none selected
-            if ($('.chatshop-tabs .nav-tab-active').length === 0) {
-                $('.chatshop-tabs .nav-tab:first').addClass('nav-tab-active');
-                $('.chatshop-tab-content:first').addClass('active');
-            }
-        },
-
-        initTooltips: function() {
-            // Initialize WordPress tooltips
-            $('.chatshop-tooltip').each(function() {
-                $(this).attr('title', $(this).data('tooltip'));
-            });
-        },
-
-        checkConnectionStatus: function() {
-            // Check WhatsApp connection status
-            this.checkWhatsAppStatus();
-            
-            // Check payment gateway status
-            this.checkPaymentStatus();
-        },
-
-        testConnection: function(e) {
+        /**
+         * Copy webhook URL to clipboard
+         */
+        copyWebhookUrl: function(e) {
             e.preventDefault();
             
-            var $button = $(this);
-            var connectionType = $button.data('connection-type');
-            var originalText = $button.text();
+            const button = $(this);
+            const webhookInput = $('#webhook_url');
+            const originalText = button.text();
             
-            $button.prop('disabled', true)
-                   .html('<span class="chatshop-spinner"></span>' + chatshop_admin.strings.loading);
+            // Select and copy text
+            webhookInput.select();
+            webhookInput[0].setSelectionRange(0, 99999); // For mobile devices
             
+            try {
+                const successful = document.execCommand('copy');
+                
+                if (successful) {
+                    button.addClass('copied').text(chatshopAdmin.strings.copied);
+                    
+                    // Show success feedback
+                    ChatShopAdmin.showNotice('success', chatshopAdmin.strings.copied);
+                    
+                    setTimeout(function() {
+                        button.removeClass('copied').text(originalText);
+                    }, 2000);
+                } else {
+                    throw new Error('Copy command failed');
+                }
+            } catch (err) {
+                // Fallback for browsers that don't support execCommand
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(webhookInput.val()).then(function() {
+                        button.addClass('copied').text(chatshopAdmin.strings.copied);
+                        ChatShopAdmin.showNotice('success', chatshopAdmin.strings.copied);
+                        
+                        setTimeout(function() {
+                            button.removeClass('copied').text(originalText);
+                        }, 2000);
+                    }).catch(function() {
+                        ChatShopAdmin.showNotice('error', chatshopAdmin.strings.copyFailed);
+                    });
+                } else {
+                    ChatShopAdmin.showNotice('error', chatshopAdmin.strings.copyFailed);
+                }
+            }
+            
+            // Deselect text
+            window.getSelection().removeAllRanges();
+        },
+
+        /**
+         * Test gateway connection
+         */
+        testGatewayConnection: function(e) {
+            e.preventDefault();
+            
+            const button = $(this);
+            const resultDiv = $('#test-result');
+            const originalText = button.text();
+            
+            // Set loading state
+            button.prop('disabled', true)
+                  .addClass('chatshop-loading')
+                  .text(chatshopAdmin.strings.testing);
+            
+            resultDiv.hide();
+
+            // Make AJAX request
             $.ajax({
-                url: chatshop_admin.ajax_url,
+                url: chatshopAdmin.ajaxUrl,
                 type: 'POST',
                 data: {
-                    action: 'chatshop_admin_action',
-                    chatshop_action: 'test_' + connectionType + '_connection',
-                    nonce: chatshop_admin.nonce
+                    action: 'chatshop_test_gateway',
+                    gateway_id: 'paystack',
+                    nonce: chatshopAdmin.nonce
                 },
+                timeout: 30000, // 30 second timeout
                 success: function(response) {
                     if (response.success) {
-                        ChatShopAdmin.showNotice(response.data.message, 'success');
-                        ChatShopAdmin.updateConnectionStatus(connectionType, 'connected');
+                        resultDiv.removeClass('error info')
+                               .addClass('success')
+                               .html('<strong>' + chatshopAdmin.strings.testSuccess + '</strong> ' + response.data.message)
+                               .slideDown(300);
+                        
+                        ChatShopAdmin.showNotice('success', response.data.message);
                     } else {
-                        ChatShopAdmin.showNotice(response.data.message || chatshop_admin.strings.save_error, 'error');
-                        ChatShopAdmin.updateConnectionStatus(connectionType, 'disconnected');
+                        resultDiv.removeClass('success info')
+                               .addClass('error')
+                               .html('<strong>' + chatshopAdmin.strings.testFailed + '</strong> ' + response.data.message)
+                               .slideDown(300);
+                        
+                        ChatShopAdmin.showNotice('error', response.data.message);
                     }
                 },
-                error: function() {
-                    ChatShopAdmin.showNotice(chatshop_admin.strings.save_error, 'error');
-                    ChatShopAdmin.updateConnectionStatus(connectionType, 'disconnected');
+                error: function(xhr, status, error) {
+                    let errorMessage = chatshopAdmin.strings.error;
+                    
+                    if (status === 'timeout') {
+                        errorMessage = 'Connection timeout. Please check your internet connection and try again.';
+                    } else if (xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) {
+                        errorMessage = xhr.responseJSON.data.message;
+                    }
+                    
+                    resultDiv.removeClass('success info')
+                           .addClass('error')
+                           .html('<strong>' + chatshopAdmin.strings.testFailed + '</strong> ' + errorMessage)
+                           .slideDown(300);
+                    
+                    ChatShopAdmin.showNotice('error', errorMessage);
                 },
                 complete: function() {
-                    $button.prop('disabled', false).text(originalText);
+                    // Reset button state
+                    button.prop('disabled', false)
+                          .removeClass('chatshop-loading')
+                          .text(originalText);
                 }
             });
         },
 
-        checkWhatsAppStatus: function() {
-            var $statusIndicator = $('.whatsapp-status-indicator');
-            if ($statusIndicator.length === 0) return;
-            
-            $statusIndicator.removeClass('connected disconnected').addClass('testing');
-            
-            $.ajax({
-                url: chatshop_admin.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'chatshop_admin_action',
-                    chatshop_action: 'check_whatsapp_status',
-                    nonce: chatshop_admin.nonce
-                },
-                success: function(response) {
-                    if (response.success && response.data.connected) {
-                        $statusIndicator.removeClass('testing disconnected').addClass('connected');
-                    } else {
-                        $statusIndicator.removeClass('testing connected').addClass('disconnected');
-                    }
-                },
-                error: function() {
-                    $statusIndicator.removeClass('testing connected').addClass('disconnected');
-                }
-            });
-        },
-
-        checkPaymentStatus: function() {
-            var $statusIndicator = $('.payment-status-indicator');
-            if ($statusIndicator.length === 0) return;
-            
-            $statusIndicator.removeClass('connected disconnected').addClass('testing');
-            
-            $.ajax({
-                url: chatshop_admin.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'chatshop_admin_action',
-                    chatshop_action: 'check_payment_status',
-                    nonce: chatshop_admin.nonce
-                },
-                success: function(response) {
-                    if (response.success && response.data.connected) {
-                        $statusIndicator.removeClass('testing disconnected').addClass('connected');
-                    } else {
-                        $statusIndicator.removeClass('testing connected').addClass('disconnected');
-                    }
-                },
-                error: function() {
-                    $statusIndicator.removeClass('testing connected').addClass('disconnected');
-                }
-            });
-        },
-
-        updateConnectionStatus: function(type, status) {
-            var $indicator = $('.' + type + '-status-indicator');
-            $indicator.removeClass('connected disconnected testing').addClass(status);
-            
-            var $statusText = $('.' + type + '-status-text');
-            var statusTexts = {
-                connected: 'Connected',
-                disconnected: 'Disconnected',
-                testing: 'Testing...'
-            };
-            
-            if ($statusText.length) {
-                $statusText.text(statusTexts[status] || 'Unknown');
-            }
-        },
-
+        /**
+         * Save settings via AJAX
+         */
         saveSettings: function(e) {
             e.preventDefault();
             
-            var $form = $(this);
-            var $submitButton = $form.find('[type="submit"]');
-            var originalText = $submitButton.val();
+            const button = $(this);
+            const form = button.closest('form');
+            const group = button.data('group') || 'paystack';
+            const originalText = button.text();
             
-            $submitButton.prop('disabled', true).val(chatshop_admin.strings.loading);
+            // Set loading state
+            button.prop('disabled', true)
+                  .addClass('chatshop-loading')
+                  .text(chatshopAdmin.strings.saving);
             
-            $.ajax({
-                url: chatshop_admin.ajax_url,
-                type: 'POST',
-                data: $form.serialize() + '&action=chatshop_admin_action&chatshop_action=save_settings&nonce=' + chatshop_admin.nonce,
-                success: function(response) {
-                    if (response.success) {
-                        ChatShopAdmin.showNotice(chatshop_admin.strings.save_success, 'success');
-                    } else {
-                        ChatShopAdmin.showNotice(response.data.message || chatshop_admin.strings.save_error, 'error');
+            // Serialize form data
+            const formData = form.serializeArray();
+            const settingsData = {};
+            
+            // Convert form data to object
+            $.each(formData, function(i, field) {
+                if (field.name.includes('[') && field.name.includes(']')) {
+                    // Handle array notation (e.g., chatshop_paystack_options[enabled])
+                    const matches = field.name.match(/\[([^\]]+)\]/);
+                    if (matches) {
+                        settingsData[matches[1]] = field.value;
                     }
-                },
-                error: function() {
-                    ChatShopAdmin.showNotice(chatshop_admin.strings.save_error, 'error');
-                },
-                complete: function() {
-                    $submitButton.prop('disabled', false).val(originalText);
+                } else {
+                    settingsData[field.name] = field.value;
                 }
             });
-        },
-
-        openModal: function(e) {
-            e.preventDefault();
             
-            var modalId = $(this).data('chatshop-modal');
-            var $modal = $('#' + modalId);
-            
-            if ($modal.length) {
-                $modal.fadeIn(200);
-                $('body').addClass('chatshop-modal-open');
-            }
-        },
-
-        closeModal: function(e) {
-            if (e.target === this || $(e.target).hasClass('chatshop-modal-close')) {
-                $(this).closest('.chatshop-modal-overlay').fadeOut(200);
-                $('body').removeClass('chatshop-modal-open');
-            }
-        },
-
-        switchTab: function(e) {
-            e.preventDefault();
-            
-            var $tab = $(this);
-            var targetTab = $tab.attr('href').substring(1);
-            
-            // Remove active class from all tabs and content
-            $('.chatshop-tabs .nav-tab').removeClass('nav-tab-active');
-            $('.chatshop-tab-content').removeClass('active');
-            
-            // Add active class to clicked tab and corresponding content
-            $tab.addClass('nav-tab-active');
-            $('#' + targetTab).addClass('active');
-        },
-
-        handleAjaxForm: function(e) {
-            e.preventDefault();
-            
-            var $form = $(this);
-            var $submitButton = $form.find('[type="submit"]');
-            var originalText = $submitButton.val() || $submitButton.text();
-            
-            $submitButton.prop('disabled', true);
-            if ($submitButton.is('input')) {
-                $submitButton.val(chatshop_admin.strings.loading);
-            } else {
-                $submitButton.html('<span class="chatshop-spinner"></span>' + chatshop_admin.strings.loading);
-            }
-            
-            $.ajax({
-                url: chatshop_admin.ajax_url,
-                type: 'POST',
-                data: $form.serialize() + '&nonce=' + chatshop_admin.nonce,
-                success: function(response) {
-                    if (response.success) {
-                        ChatShopAdmin.showNotice(response.data.message || chatshop_admin.strings.success, 'success');
-                        
-                        // Reset form if requested
-                        if (response.data.reset_form) {
-                            $form[0].reset();
-                        }
-                        
-                        // Reload page if requested
-                        if (response.data.reload) {
-                            location.reload();
-                        }
-                        
-                        // Redirect if requested
-                        if (response.data.redirect) {
-                            window.location.href = response.data.redirect;
-                        }
-                    } else {
-                        ChatShopAdmin.showNotice(response.data.message || chatshop_admin.strings.error, 'error');
-                    }
-                },
-                error: function() {
-                    ChatShopAdmin.showNotice(chatshop_admin.strings.error, 'error');
-                },
-                complete: function() {
-                    $submitButton.prop('disabled', false);
-                    if ($submitButton.is('input')) {
-                        $submitButton.val(originalText);
-                    } else {
-                        $submitButton.text(originalText);
+            // Handle checkboxes (they don't appear in serializeArray if unchecked)
+            form.find('input[type="checkbox"]').each(function() {
+                const name = $(this).attr('name');
+                if (name && name.includes('[') && name.includes(']')) {
+                    const matches = name.match(/\[([^\]]+)\]/);
+                    if (matches && !settingsData.hasOwnProperty(matches[1])) {
+                        settingsData[matches[1]] = false;
                     }
                 }
             });
-        },
 
-        copyToClipboard: function(e) {
-            e.preventDefault();
-            
-            var $button = $(this);
-            var textToCopy = $button.data('copy-text') || $button.prev('input').val();
-            
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(textToCopy).then(function() {
-                    ChatShopAdmin.showNotice('Copied to clipboard!', 'success', 2000);
-                });
-            } else {
-                // Fallback for older browsers
-                var $temp = $('<textarea>');
-                $('body').append($temp);
-                $temp.val(textToCopy).select();
-                document.execCommand('copy');
-                $temp.remove();
-                ChatShopAdmin.showNotice('Copied to clipboard!', 'success', 2000);
-            }
-        },
-
-        refreshData: function(e) {
-            e.preventDefault();
-            
-            var $button = $(this);
-            var dataType = $button.data('refresh-type');
-            var originalText = $button.text();
-            
-            $button.prop('disabled', true)
-                   .html('<span class="chatshop-spinner"></span>' + chatshop_admin.strings.loading);
-            
+            // Make AJAX request
             $.ajax({
-                url: chatshop_admin.ajax_url,
+                url: chatshopAdmin.ajaxUrl,
                 type: 'POST',
                 data: {
-                    action: 'chatshop_admin_action',
-                    chatshop_action: 'refresh_' + dataType,
-                    nonce: chatshop_admin.nonce
+                    action: 'chatshop_save_settings',
+                    group: group,
+                    data: settingsData,
+                    nonce: chatshopAdmin.nonce
                 },
                 success: function(response) {
                     if (response.success) {
-                        ChatShopAdmin.showNotice('Data refreshed successfully!', 'success');
+                        ChatShopAdmin.showNotice('success', response.data.message);
                         
-                        // Update specific data sections
-                        if (response.data.html) {
-                            var $target = $button.data('target');
-                            if ($target) {
-                                $($target).html(response.data.html);
-                            }
-                        }
-                        
-                        // Reload page if no specific target
-                        if (!response.data.html) {
-                            location.reload();
-                        }
+                        // Mark form as saved
+                        form.addClass('chatshop-form-saved').removeClass('chatshop-form-changed');
                     } else {
-                        ChatShopAdmin.showNotice(response.data.message || 'Error refreshing data.', 'error');
+                        ChatShopAdmin.showNotice('error', response.data.message);
                     }
                 },
                 error: function() {
-                    ChatShopAdmin.showNotice('Error refreshing data.', 'error');
+                    ChatShopAdmin.showNotice('error', chatshopAdmin.strings.error);
                 },
                 complete: function() {
-                    $button.prop('disabled', false).text(originalText);
+                    // Reset button state
+                    button.prop('disabled', false)
+                          .removeClass('chatshop-loading')
+                          .text(originalText);
                 }
             });
         },
 
-        showNotice: function(message, type, duration) {
-            type = type || 'info';
-            duration = duration || 5000;
+        /**
+         * Reset settings
+         */
+        resetSettings: function(e) {
+            e.preventDefault();
             
-            var $notice = $('<div class="notice notice-' + type + ' is-dismissible chatshop-notice">')
-                .html('<p>' + message + '</p>')
-                .hide();
-            
-            // Add dismiss button
-            $notice.append('<button type="button" class="notice-dismiss"><span class="screen-reader-text">Dismiss this notice.</span></button>');
-            
-            // Insert notice
-            if ($('.wrap > h1').length) {
-                $notice.insertAfter('.wrap > h1');
-            } else {
-                $notice.prependTo('.wrap');
+            if (!confirm(chatshopAdmin.strings.confirmReset)) {
+                return;
             }
             
-            $notice.slideDown(200);
+            const button = $(this);
+            const group = button.data('group') || 'paystack';
+            const originalText = button.text();
             
-            // Auto dismiss
-            if (duration > 0) {
-                setTimeout(function() {
-                    $notice.slideUp(200, function() {
-                        $(this).remove();
-                    });
-                }, duration);
-            }
-            
-            // Manual dismiss
-            $notice.on('click', '.notice-dismiss', function() {
-                $notice.slideUp(200, function() {
-                    $(this).remove();
-                });
+            // Set loading state
+            button.prop('disabled', true)
+                  .addClass('chatshop-loading')
+                  .text(chatshopAdmin.strings.resetting);
+
+            // Make AJAX request
+            $.ajax({
+                url: chatshopAdmin.ajaxUrl,
+                type: 'POST',
+                data: {
+                    action: 'chatshop_reset_settings',
+                    group: group,
+                    nonce: chatshopAdmin.nonce
+                },
+                success: function(response) {
+                    if (response.success) {
+                        ChatShopAdmin.showNotice('success', response.data.message);
+                        
+                        // Reload page to reflect reset settings
+                        setTimeout(function() {
+                            window.location.reload();
+                        }, 1500);
+                    } else {
+                        ChatShopAdmin.showNotice('error', response.data.message);
+                    }
+                },
+                error: function() {
+                    ChatShopAdmin.showNotice('error', chatshopAdmin.strings.error);
+                },
+                complete: function() {
+                    // Reset button state
+                    button.prop('disabled', false)
+                          .removeClass('chatshop-loading')
+                          .text(originalText);
+                }
             });
         },
 
-        hideNotice: function() {
-            $('.chatshop-notice').slideUp(200, function() {
+        /**
+         * Track form changes
+         */
+        trackFormChanges: function() {
+            const form = $(this).closest('form');
+            form.addClass('chatshop-form-changed').removeClass('chatshop-form-saved');
+        },
+
+        /**
+         * Validate API key format
+         */
+        validateApiKey: function() {
+            const input = $(this);
+            const value = input.val().trim();
+            const name = input.attr('name') || '';
+            
+            if (!value) return;
+            
+            let expectedPrefix = '';
+            let keyType = '';
+            
+            // Determine expected prefix based on field name
+            if (name.includes('test_public_key')) {
+                expectedPrefix = 'pk_test_';
+                keyType = 'Test Public Key';
+            } else if (name.includes('test_secret_key')) {
+                expectedPrefix = 'sk_test_';
+                keyType = 'Test Secret Key';
+            } else if (name.includes('live_public_key')) {
+                expectedPrefix = 'pk_live_';
+                keyType = 'Live Public Key';
+            } else if (name.includes('live_secret_key')) {
+                expectedPrefix = 'sk_live_';
+                keyType = 'Live Secret Key';
+            }
+            
+            if (expectedPrefix && !value.startsWith(expectedPrefix)) {
+                input.addClass('chatshop-invalid');
+                ChatShopAdmin.showFieldError(input, `${keyType} must start with "${expectedPrefix}"`);
+            } else {
+                input.removeClass('chatshop-invalid');
+                ChatShopAdmin.clearFieldError(input);
+            }
+        },
+
+        /**
+         * Show field-specific error
+         */
+        showFieldError: function(field, message) {
+            this.clearFieldError(field);
+            
+            const errorDiv = $('<div class="chatshop-field-error">' + message + '</div>');
+            field.after(errorDiv);
+        },
+
+        /**
+         * Clear field-specific error
+         */
+        clearFieldError: function(field) {
+            field.siblings('.chatshop-field-error').remove();
+        },
+
+        /**
+         * Show admin notice
+         */
+        showNotice: function(type, message) {
+            const noticeClass = type === 'success' ? 'notice-success' : 
+                              type === 'error' ? 'notice-error' : 'notice-info';
+            
+            const notice = $('<div class="notice ' + noticeClass + ' is-dismissible chatshop-notice">' +
+                            '<p>' + message + '</p>' +
+                            '<button type="button" class="notice-dismiss">' +
+                            '<span class="screen-reader-text">Dismiss this notice.</span>' +
+                            '</button>' +
+                            '</div>');
+            
+            // Remove existing notices
+            $('.chatshop-notice').fadeOut(300, function() {
+                $(this).remove();
+            });
+            
+            // Add new notice
+            if ($('.wrap h1').length) {
+                $('.wrap h1').after(notice);
+            } else {
+                $('.wrap').prepend(notice);
+            }
+            
+            // Auto-dismiss after 5 seconds
+            setTimeout(function() {
+                notice.fadeOut(300, function() {
+                    $(this).remove();
+                });
+            }, 5000);
+        },
+
+        /**
+         * Dismiss notice
+         */
+        dismissNotice: function(e) {
+            e.preventDefault();
+            $(this).closest('.notice').fadeOut(300, function() {
                 $(this).remove();
             });
         },
 
-        // Utility functions
-        formatNumber: function(num) {
-            return new Intl.NumberFormat().format(num);
+        /**
+         * Initialize tooltips
+         */
+        initTooltips: function() {
+            // Add tooltips to elements with title attribute
+            $('[title]').each(function() {
+                $(this).hover(
+                    function() {
+                        const title = $(this).attr('title');
+                        $(this).data('tipText', title).removeAttr('title');
+                        $('<div class="chatshop-tooltip">' + title + '</div>')
+                            .appendTo('body')
+                            .fadeIn(200);
+                    },
+                    function() {
+                        $(this).attr('title', $(this).data('tipText'));
+                        $('.chatshop-tooltip').remove();
+                    }
+                ).mousemove(function(e) {
+                    $('.chatshop-tooltip').css({
+                        top: e.pageY + 10,
+                        left: e.pageX + 10
+                    });
+                });
+            });
         },
 
-        formatCurrency: function(amount, currency) {
-            currency = currency || 'NGN';
-            return new Intl.NumberFormat('en-NG', {
+        /**
+         * Initialize form validation
+         */
+        initFormValidation: function() {
+            // Prevent form submission if there are validation errors
+            $('form').on('submit', function(e) {
+                const form = $(this);
+                const invalidFields = form.find('.chatshop-invalid');
+                
+                if (invalidFields.length > 0) {
+                    e.preventDefault();
+                    ChatShopAdmin.showNotice('error', 'Please fix the validation errors before saving.');
+                    
+                    // Focus on first invalid field
+                    invalidFields.first().focus();
+                }
+            });
+        },
+
+        /**
+         * Format currency
+         */
+        formatCurrency: function(amount, currency = 'NGN') {
+            const formatter = new Intl.NumberFormat('en-US', {
                 style: 'currency',
-                currency: currency
-            }).format(amount);
+                currency: currency,
+                minimumFractionDigits: 2
+            });
+            
+            return formatter.format(amount / 100); // Convert from kobo to naira
         },
 
+        /**
+         * Validate email
+         */
+        validateEmail: function(email) {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
+        },
+
+        /**
+         * Validate phone number
+         */
+        validatePhone: function(phone) {
+            const re = /^\+?[\d\s\-\(\)]+$/;
+            return re.test(phone) && phone.replace(/\D/g, '').length >= 10;
+        },
+
+        /**
+         * Debounce function
+         */
         debounce: function(func, wait, immediate) {
-            var timeout;
-            return function() {
-                var context = this, args = arguments;
-                var later = function() {
+            let timeout;
+            return function executedFunction() {
+                const context = this;
+                const args = arguments;
+                const later = function() {
                     timeout = null;
                     if (!immediate) func.apply(context, args);
                 };
-                var callNow = immediate && !timeout;
+                const callNow = immediate && !timeout;
                 clearTimeout(timeout);
                 timeout = setTimeout(later, wait);
                 if (callNow) func.apply(context, args);
             };
-        },
-
-        // Analytics functions
-        loadAnalyticsData: function(period) {
-            period = period || '30days';
-            
-            var $container = $('.chatshop-analytics-container');
-            if ($container.length === 0) return;
-            
-            $container.addClass('chatshop-loading');
-            
-            $.ajax({
-                url: chatshop_admin.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'chatshop_admin_action',
-                    chatshop_action: 'get_analytics_data',
-                    period: period,
-                    nonce: chatshop_admin.nonce
-                },
-                success: function(response) {
-                    if (response.success) {
-                        ChatShopAdmin.renderAnalytics(response.data);
-                    } else {
-                        ChatShopAdmin.showNotice('Error loading analytics data.', 'error');
-                    }
-                },
-                error: function() {
-                    ChatShopAdmin.showNotice('Error loading analytics data.', 'error');
-                },
-                complete: function() {
-                    $container.removeClass('chatshop-loading');
-                }
-            });
-        },
-
-        renderAnalytics: function(data) {
-            // Update stats cards
-            $('.stat-total-contacts').text(this.formatNumber(data.total_contacts || 0));
-            $('.stat-total-payments').text(this.formatNumber(data.total_payments || 0));
-            $('.stat-total-revenue').text(this.formatCurrency(data.total_revenue || 0));
-            $('.stat-conversion-rate').text((data.conversion_rate || 0) + '%');
-            
-            // Update charts if chart library is available
-            if (typeof Chart !== 'undefined') {
-                this.updateCharts(data);
-            }
-        },
-
-        updateCharts: function(data) {
-            // Implementation would depend on chart library used
-            // This is a placeholder for chart updates
-            console.log('Updating charts with data:', data);
-        },
-
-        // Form validation
-        validateForm: function($form) {
-            var isValid = true;
-            var $firstInvalid = null;
-            
-            $form.find('[required]').each(function() {
-                var $field = $(this);
-                var value = $field.val().trim();
-                
-                $field.removeClass('error');
-                
-                if (!value) {
-                    $field.addClass('error');
-                    isValid = false;
-                    
-                    if (!$firstInvalid) {
-                        $firstInvalid = $field;
-                    }
-                }
-            });
-            
-            // Validate email fields
-            $form.find('input[type="email"]').each(function() {
-                var $field = $(this);
-                var value = $field.val().trim();
-                
-                if (value && !ChatShopAdmin.isValidEmail(value)) {
-                    $field.addClass('error');
-                    isValid = false;
-                    
-                    if (!$firstInvalid) {
-                        $firstInvalid = $field;
-                    }
-                }
-            });
-            
-            if (!isValid && $firstInvalid) {
-                $firstInvalid.focus();
-                ChatShopAdmin.showNotice('Please check the highlighted fields.', 'error');
-            }
-            
-            return isValid;
-        },
-
-        isValidEmail: function(email) {
-            var regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            return regex.test(email);
-        },
-
-        // Initialize dashboard widgets
-        initDashboard: function() {
-            // Auto-refresh dashboard data every 5 minutes
-            setInterval(function() {
-                ChatShopAdmin.refreshDashboardStats();
-            }, 300000);
-            
-            // Load initial analytics data
-            this.loadAnalyticsData();
-        },
-
-        refreshDashboardStats: function() {
-            $.ajax({
-                url: chatshop_admin.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'chatshop_admin_action',
-                    chatshop_action: 'get_dashboard_stats',
-                    nonce: chatshop_admin.nonce
-                },
-                success: function(response) {
-                    if (response.success) {
-                        ChatShopAdmin.updateDashboardStats(response.data);
-                    }
-                }
-            });
-        },
-
-        updateDashboardStats: function(stats) {
-            $('.stat-total-contacts h3').text(this.formatNumber(stats.total_contacts || 0));
-            $('.stat-total-payments h3').text(this.formatNumber(stats.total_payments || 0));
-            $('.stat-total-revenue h3').text(this.formatCurrency(stats.total_revenue || 0));
-            
-            // Update connection status
-            if (stats.whatsapp_connected !== undefined) {
-                this.updateConnectionStatus('whatsapp', stats.whatsapp_connected ? 'connected' : 'disconnected');
-            }
         }
     };
 
-    // Initialize when document is ready
+    /**
+     * Initialize when document is ready
+     */
     $(document).ready(function() {
         ChatShopAdmin.init();
         
-        // Initialize dashboard if on dashboard page
-        if ($('.chatshop-dashboard-header').length) {
-            ChatShopAdmin.initDashboard();
-        }
+        // Warn user about unsaved changes
+        window.addEventListener('beforeunload', function(e) {
+            if ($('.chatshop-form-changed').length > 0) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+                return e.returnValue;
+            }
+        });
     });
 
-    // Export for global access
+    // Expose to global scope
     window.ChatShopAdmin = ChatShopAdmin;
 
 })(jQuery);

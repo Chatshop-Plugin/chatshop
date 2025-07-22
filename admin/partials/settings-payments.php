@@ -1,476 +1,393 @@
 <?php
 
 /**
- * Admin Payment Settings Page - Fixed
+ * Payment Settings Admin Template
  *
  * @package ChatShop
- * @since 1.0.0
+ * @since   1.0.0
  */
 
-// Prevent direct access
-if (!defined('ABSPATH')) {
-    exit;
+namespace ChatShop;
+
+// If this file is called directly, abort.
+if (!defined('WPINC')) {
+    die;
 }
 
-// Get the main ChatShop instance
-$chatshop_instance = \ChatShop\ChatShop::instance();
+// Get current payment settings
+$paystack_options = chatshop_get_option('paystack', '', array());
+$general_options = chatshop_get_option('general', '', array());
 
-// Get available payment gateways safely
-$gateways = array();
-if ($chatshop_instance && method_exists($chatshop_instance, 'get_registered_gateways')) {
-    $gateways = $chatshop_instance->get_registered_gateways();
-}
+// Default values
+$paystack_enabled = isset($paystack_options['enabled']) ? $paystack_options['enabled'] : false;
+$test_mode = isset($paystack_options['test_mode']) ? $paystack_options['test_mode'] : true;
+$test_public_key = isset($paystack_options['test_public_key']) ? $paystack_options['test_public_key'] : '';
+$test_secret_key = isset($paystack_options['test_secret_key']) ? $paystack_options['test_secret_key'] : '';
+$live_public_key = isset($paystack_options['live_public_key']) ? $paystack_options['live_public_key'] : '';
+$live_secret_key = isset($paystack_options['live_secret_key']) ? $paystack_options['live_secret_key'] : '';
+$webhook_url = home_url('/wp-admin/admin-ajax.php?action=chatshop_webhook&gateway=paystack');
 
-// Check premium features
-$premium_features = false;
-if (function_exists('chatshop_is_premium_feature_available')) {
-    $premium_features = chatshop_is_premium_feature_available('multiple_gateways');
-}
-
+// Check if premium features are available
+$premium_available = chatshop_is_premium_feature_available('multiple_gateways');
 ?>
 
-<div class="wrap chatshop-admin">
-    <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+<div class="wrap">
+    <h1><?php esc_html_e('Payment Settings', 'chatshop'); ?></h1>
 
-    <div class="chatshop-admin-header">
-        <p class="description">
-            <?php esc_html_e('Configure payment gateways for processing transactions through WhatsApp.', 'chatshop'); ?>
-        </p>
-    </div>
+    <form method="post" action="options.php" id="chatshop-payment-settings">
+        <?php
+        settings_fields('chatshop_payment_settings');
+        do_settings_sections('chatshop_payment_settings');
+        ?>
 
-    <?php settings_errors('chatshop_payment_settings'); ?>
+        <!-- Paystack Configuration -->
+        <div class="chatshop-payment-gateway" id="paystack-settings">
+            <h2 class="title">
+                <span class="gateway-logo">
+                    <img src="<?php echo esc_url(CHATSHOP_PLUGIN_URL . 'assets/icons/paystack.svg'); ?>" alt="Paystack" width="24" height="24">
+                </span>
+                <?php esc_html_e('Paystack Payment Gateway', 'chatshop'); ?>
+                <span class="gateway-status <?php echo $paystack_enabled ? 'enabled' : 'disabled'; ?>">
+                    <?php echo $paystack_enabled ? esc_html__('Enabled', 'chatshop') : esc_html__('Disabled', 'chatshop'); ?>
+                </span>
+            </h2>
 
-    <div class="chatshop-payment-settings">
+            <table class="form-table" role="presentation">
+                <tbody>
+                    <tr>
+                        <th scope="row">
+                            <label for="paystack_enabled"><?php esc_html_e('Enable Paystack', 'chatshop'); ?></label>
+                        </th>
+                        <td>
+                            <fieldset>
+                                <label for="paystack_enabled">
+                                    <input type="checkbox"
+                                        id="paystack_enabled"
+                                        name="chatshop_paystack_options[enabled]"
+                                        value="1"
+                                        <?php checked($paystack_enabled, true); ?>>
+                                    <?php esc_html_e('Enable Paystack payment gateway', 'chatshop'); ?>
+                                </label>
+                            </fieldset>
+                        </td>
+                    </tr>
 
-        <!-- Payment Gateway Status -->
-        <div class="chatshop-admin-section">
-            <h2><?php esc_html_e('Gateway Status', 'chatshop'); ?></h2>
+                    <tr>
+                        <th scope="row">
+                            <label for="paystack_test_mode"><?php esc_html_e('Test Mode', 'chatshop'); ?></label>
+                        </th>
+                        <td>
+                            <fieldset>
+                                <label for="paystack_test_mode">
+                                    <input type="checkbox"
+                                        id="paystack_test_mode"
+                                        name="chatshop_paystack_options[test_mode]"
+                                        value="1"
+                                        <?php checked($test_mode, true); ?>>
+                                    <?php esc_html_e('Enable test mode for development', 'chatshop'); ?>
+                                </label>
+                                <p class="description">
+                                    <?php esc_html_e('When enabled, transactions will be processed using test API keys.', 'chatshop'); ?>
+                                </p>
+                            </fieldset>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
 
-            <div class="chatshop-gateway-status">
-                <?php if (empty($gateways)) : ?>
-                    <div class="notice notice-warning inline">
-                        <p>
-                            <?php esc_html_e('No payment gateways are currently available.', 'chatshop'); ?>
-                            <br>
-                            <small><?php esc_html_e('This may be because the payment system is not fully initialized yet.', 'chatshop'); ?></small>
-                        </p>
-                        <p>
-                            <a href="<?php echo esc_url(admin_url('admin.php?page=chatshop-settings')); ?>" class="button button-secondary">
-                                <?php esc_html_e('Check System Status', 'chatshop'); ?>
-                            </a>
-                        </p>
-                    </div>
-                <?php else : ?>
-                    <table class="wp-list-table widefat fixed striped">
-                        <thead>
-                            <tr>
-                                <th><?php esc_html_e('Gateway', 'chatshop'); ?></th>
-                                <th><?php esc_html_e('Status', 'chatshop'); ?></th>
-                                <th><?php esc_html_e('Test Mode', 'chatshop'); ?></th>
-                                <th><?php esc_html_e('Actions', 'chatshop'); ?></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($gateways as $gateway_id => $gateway) : ?>
-                                <tr>
-                                    <td>
-                                        <strong><?php echo esc_html($gateway->get_title()); ?></strong>
-                                        <br>
-                                        <small class="description"><?php echo esc_html($gateway->get_description()); ?></small>
-                                    </td>
-                                    <td>
-                                        <?php if ($gateway->is_enabled()) : ?>
-                                            <span class="chatshop-status chatshop-status-enabled">
-                                                <?php esc_html_e('Enabled', 'chatshop'); ?>
-                                            </span>
-                                        <?php else : ?>
-                                            <span class="chatshop-status chatshop-status-disabled">
-                                                <?php esc_html_e('Disabled', 'chatshop'); ?>
-                                            </span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?php if ($gateway->is_test_mode()) : ?>
-                                            <span class="chatshop-status chatshop-status-test">
-                                                <?php esc_html_e('Test Mode', 'chatshop'); ?>
-                                            </span>
-                                        <?php else : ?>
-                                            <span class="chatshop-status chatshop-status-live">
-                                                <?php esc_html_e('Live Mode', 'chatshop'); ?>
-                                            </span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <a href="#gateway-<?php echo esc_attr($gateway_id); ?>"
-                                            class="button button-secondary chatshop-configure-gateway">
-                                            <?php esc_html_e('Configure', 'chatshop'); ?>
-                                        </a>
+            <!-- Test Mode Keys -->
+            <div id="test-keys-section" class="api-keys-section" <?php echo !$test_mode ? 'style="display:none;"' : ''; ?>>
+                <h3><?php esc_html_e('Test API Keys', 'chatshop'); ?></h3>
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row">
+                                <label for="test_public_key"><?php esc_html_e('Test Public Key', 'chatshop'); ?></label>
+                            </th>
+                            <td>
+                                <input type="text"
+                                    id="test_public_key"
+                                    name="chatshop_paystack_options[test_public_key]"
+                                    value="<?php echo esc_attr($test_public_key); ?>"
+                                    class="regular-text"
+                                    placeholder="pk_test_xxxxxxxxxx">
+                                <p class="description">
+                                    <?php esc_html_e('Your Paystack test public key (starts with pk_test_)', 'chatshop'); ?>
+                                </p>
+                            </td>
+                        </tr>
 
-                                        <?php if (method_exists($gateway, 'test_connection')) : ?>
-                                            <button type="button"
-                                                class="button button-secondary chatshop-test-gateway"
-                                                data-gateway="<?php echo esc_attr($gateway_id); ?>">
-                                                <?php esc_html_e('Test Connection', 'chatshop'); ?>
-                                            </button>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php endif; ?>
+                        <tr>
+                            <th scope="row">
+                                <label for="test_secret_key"><?php esc_html_e('Test Secret Key', 'chatshop'); ?></label>
+                            </th>
+                            <td>
+                                <input type="password"
+                                    id="test_secret_key"
+                                    name="chatshop_paystack_options[test_secret_key]"
+                                    value="<?php echo esc_attr($test_secret_key); ?>"
+                                    class="regular-text"
+                                    placeholder="sk_test_xxxxxxxxxx">
+                                <p class="description">
+                                    <?php esc_html_e('Your Paystack test secret key (starts with sk_test_)', 'chatshop'); ?>
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Live Mode Keys -->
+            <div id="live-keys-section" class="api-keys-section" <?php echo $test_mode ? 'style="display:none;"' : ''; ?>>
+                <h3><?php esc_html_e('Live API Keys', 'chatshop'); ?></h3>
+                <div class="notice notice-warning inline">
+                    <p>
+                        <?php esc_html_e('⚠️ Live mode will process real transactions. Ensure you have thoroughly tested in test mode first.', 'chatshop'); ?>
+                    </p>
+                </div>
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row">
+                                <label for="live_public_key"><?php esc_html_e('Live Public Key', 'chatshop'); ?></label>
+                            </th>
+                            <td>
+                                <input type="text"
+                                    id="live_public_key"
+                                    name="chatshop_paystack_options[live_public_key]"
+                                    value="<?php echo esc_attr($live_public_key); ?>"
+                                    class="regular-text"
+                                    placeholder="pk_live_xxxxxxxxxx">
+                                <p class="description">
+                                    <?php esc_html_e('Your Paystack live public key (starts with pk_live_)', 'chatshop'); ?>
+                                </p>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <th scope="row">
+                                <label for="live_secret_key"><?php esc_html_e('Live Secret Key', 'chatshop'); ?></label>
+                            </th>
+                            <td>
+                                <input type="password"
+                                    id="live_secret_key"
+                                    name="chatshop_paystack_options[live_secret_key]"
+                                    value="<?php echo esc_attr($live_secret_key); ?>"
+                                    class="regular-text"
+                                    placeholder="sk_live_xxxxxxxxxx">
+                                <p class="description">
+                                    <?php esc_html_e('Your Paystack live secret key (starts with sk_live_)', 'chatshop'); ?>
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Webhook Configuration -->
+            <h3><?php esc_html_e('Webhook Configuration', 'chatshop'); ?></h3>
+            <table class="form-table" role="presentation">
+                <tbody>
+                    <tr>
+                        <th scope="row">
+                            <label for="webhook_url"><?php esc_html_e('Webhook URL', 'chatshop'); ?></label>
+                        </th>
+                        <td>
+                            <input type="text"
+                                id="webhook_url"
+                                value="<?php echo esc_url($webhook_url); ?>"
+                                class="regular-text"
+                                readonly>
+                            <button type="button" class="button button-small" id="copy-webhook-url">
+                                <?php esc_html_e('Copy', 'chatshop'); ?>
+                            </button>
+                            <p class="description">
+                                <?php
+                                printf(
+                                    esc_html__('Copy this URL and add it to your %sPaystack Dashboard%s under Settings > Webhooks.', 'chatshop'),
+                                    '<a href="https://dashboard.paystack.com/#/settings/developer" target="_blank">',
+                                    '</a>'
+                                );
+                                ?>
+                            </p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- Test Connection -->
+            <div class="test-connection-section">
+                <h3><?php esc_html_e('Test Connection', 'chatshop'); ?></h3>
+                <p class="description">
+                    <?php esc_html_e('Test your API connection to ensure everything is configured correctly.', 'chatshop'); ?>
+                </p>
+                <button type="button" class="button" id="test-paystack-connection">
+                    <?php esc_html_e('Test Connection', 'chatshop'); ?>
+                </button>
+                <div id="test-result" class="test-result" style="display: none;"></div>
             </div>
         </div>
 
-        <!-- Gateway Configuration -->
-        <?php foreach ($gateways as $gateway_id => $gateway) : ?>
-            <div id="gateway-<?php echo esc_attr($gateway_id); ?>" class="chatshop-admin-section chatshop-gateway-config">
-                <h2>
-                    <?php echo esc_html($gateway->get_title()); ?>
-                    <?php esc_html_e('Configuration', 'chatshop'); ?>
-                </h2>
-
-                <form method="post" action="options.php" class="chatshop-gateway-form">
-                    <?php
-                    settings_fields("chatshop_{$gateway_id}_options");
-                    $config_fields = method_exists($gateway, 'get_config_fields') ? $gateway->get_config_fields() : array();
-                    $current_settings = get_option("chatshop_{$gateway_id}_options", array());
-                    ?>
-
-                    <?php if (!empty($config_fields)) : ?>
-                        <table class="form-table" role="presentation">
-                            <?php foreach ($config_fields as $field_id => $field) : ?>
-                                <?php
-                                $field_name = "chatshop_{$gateway_id}_options[{$field_id}]";
-                                $field_value = isset($current_settings[$field_id]) ? $current_settings[$field_id] : ($field['default'] ?? '');
-                                ?>
-                                <tr>
-                                    <th scope="row">
-                                        <label for="<?php echo esc_attr($field_name); ?>">
-                                            <?php echo esc_html($field['title']); ?>
-                                        </label>
-                                    </th>
-                                    <td>
-                                        <?php switch ($field['type']):
-                                            case 'checkbox': ?>
-                                                <fieldset>
-                                                    <legend class="screen-reader-text">
-                                                        <span><?php echo esc_html($field['title']); ?></span>
-                                                    </legend>
-                                                    <label for="<?php echo esc_attr($field_name); ?>">
-                                                        <input type="checkbox"
-                                                            id="<?php echo esc_attr($field_name); ?>"
-                                                            name="<?php echo esc_attr($field_name); ?>"
-                                                            value="yes"
-                                                            <?php checked($field_value, 'yes'); ?> />
-                                                        <?php echo esc_html($field['description'] ?? ''); ?>
-                                                    </label>
-                                                </fieldset>
-                                            <?php break;
-
-                                            case 'password': ?>
-                                                <input type="password"
-                                                    id="<?php echo esc_attr($field_name); ?>"
-                                                    name="<?php echo esc_attr($field_name); ?>"
-                                                    value="<?php echo esc_attr($field_value); ?>"
-                                                    class="regular-text" />
-                                                <?php if (!empty($field['description'])) : ?>
-                                                    <p class="description"><?php echo esc_html($field['description']); ?></p>
-                                                <?php endif; ?>
-                                            <?php break;
-
-                                            case 'textarea': ?>
-                                                <textarea id="<?php echo esc_attr($field_name); ?>"
-                                                    name="<?php echo esc_attr($field_name); ?>"
-                                                    rows="3"
-                                                    class="large-text"><?php echo esc_textarea($field_value); ?></textarea>
-                                                <?php if (!empty($field['description'])) : ?>
-                                                    <p class="description"><?php echo esc_html($field['description']); ?></p>
-                                                <?php endif; ?>
-                                            <?php break;
-
-                                            case 'select': ?>
-                                                <select id="<?php echo esc_attr($field_name); ?>"
-                                                    name="<?php echo esc_attr($field_name); ?>">
-                                                    <?php if (!empty($field['options'])) : ?>
-                                                        <?php foreach ($field['options'] as $option_value => $option_label) : ?>
-                                                            <option value="<?php echo esc_attr($option_value); ?>"
-                                                                <?php selected($field_value, $option_value); ?>>
-                                                                <?php echo esc_html($option_label); ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    <?php endif; ?>
-                                                </select>
-                                                <?php if (!empty($field['description'])) : ?>
-                                                    <p class="description"><?php echo esc_html($field['description']); ?></p>
-                                                <?php endif; ?>
-                                            <?php break;
-
-                                            default: // text 
-                                            ?>
-                                                <input type="text"
-                                                    id="<?php echo esc_attr($field_name); ?>"
-                                                    name="<?php echo esc_attr($field_name); ?>"
-                                                    value="<?php echo esc_attr($field_value); ?>"
-                                                    class="regular-text" />
-                                                <?php if (!empty($field['description'])) : ?>
-                                                    <p class="description"><?php echo esc_html($field['description']); ?></p>
-                                                <?php endif; ?>
-                                        <?php break;
-                                        endswitch; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </table>
-                    <?php else : ?>
-                        <p class="description">
-                            <?php esc_html_e('No configuration options available for this gateway.', 'chatshop'); ?>
-                        </p>
-                    <?php endif; ?>
-
-                    <?php if (method_exists($gateway, 'get_webhook_url')) : ?>
-                        <div class="chatshop-gateway-webhook-info">
-                            <h4><?php esc_html_e('Webhook Information', 'chatshop'); ?></h4>
-                            <p class="description">
-                                <?php esc_html_e('Configure this webhook URL in your payment gateway dashboard:', 'chatshop'); ?>
-                            </p>
-                            <code class="chatshop-webhook-url">
-                                <?php echo esc_url($gateway->get_webhook_url()); ?>
-                            </code>
-                            <button type="button" class="button button-small chatshop-copy-webhook"
-                                data-webhook="<?php echo esc_attr($gateway->get_webhook_url()); ?>">
-                                <?php esc_html_e('Copy URL', 'chatshop'); ?>
-                            </button>
-                        </div>
-                    <?php endif; ?>
-
-                    <?php if (!empty($config_fields)) : ?>
-                        <?php submit_button(sprintf(__('Save %s Settings', 'chatshop'), $gateway->get_title())); ?>
-                    <?php endif; ?>
-                </form>
-            </div>
-        <?php endforeach; ?>
-
-        <!-- Quick Setup for New Installations -->
-        <?php if (empty($gateways)) : ?>
-            <div class="chatshop-admin-section">
-                <h2><?php esc_html_e('Quick Setup', 'chatshop'); ?></h2>
-                <p><?php esc_html_e('It looks like ChatShop is not fully set up yet. Let\'s get you started!', 'chatshop'); ?></p>
-
-                <div class="chatshop-setup-steps">
-                    <div class="chatshop-setup-step">
-                        <h3><?php esc_html_e('Step 1: Enable the Plugin', 'chatshop'); ?></h3>
-                        <p><?php esc_html_e('Make sure ChatShop is enabled in your general settings.', 'chatshop'); ?></p>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=chatshop-settings')); ?>" class="button button-secondary">
-                            <?php esc_html_e('General Settings', 'chatshop'); ?>
-                        </a>
-                    </div>
-
-                    <div class="chatshop-setup-step">
-                        <h3><?php esc_html_e('Step 2: Check System Requirements', 'chatshop'); ?></h3>
-                        <p><?php esc_html_e('Ensure all system requirements are met for proper functionality.', 'chatshop'); ?></p>
-                        <a href="<?php echo esc_url(admin_url('admin.php?page=chatshop-settings')); ?>" class="button button-secondary">
-                            <?php esc_html_e('System Info', 'chatshop'); ?>
-                        </a>
-                    </div>
-
-                    <div class="chatshop-setup-step">
-                        <h3><?php esc_html_e('Step 3: Contact Support', 'chatshop'); ?></h3>
-                        <p><?php esc_html_e('If you continue to have issues, please contact our support team.', 'chatshop'); ?></p>
-                        <a href="#" class="button button-secondary">
-                            <?php esc_html_e('Get Support', 'chatshop'); ?>
-                        </a>
-                    </div>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <!-- Premium Features -->
-        <?php if (!$premium_features) : ?>
-            <div class="chatshop-admin-section chatshop-premium-notice">
-                <h2><?php esc_html_e('Premium Payment Features', 'chatshop'); ?></h2>
+        <?php if (!$premium_available) : ?>
+            <div class="chatshop-premium-notice">
+                <h2><?php esc_html_e('Additional Payment Gateways', 'chatshop'); ?></h2>
                 <div class="notice notice-info inline">
                     <p>
-                        <strong><?php esc_html_e('Upgrade to Premium for:', 'chatshop'); ?></strong>
-                    </p>
-                    <ul>
-                        <li><?php esc_html_e('Multiple Payment Gateways (PayPal, Flutterwave, Razorpay)', 'chatshop'); ?></li>
-                        <li><?php esc_html_e('Advanced Payment Analytics', 'chatshop'); ?></li>
-                        <li><?php esc_html_e('Abandoned Payment Recovery', 'chatshop'); ?></li>
-                        <li><?php esc_html_e('Multi-currency Support', 'chatshop'); ?></li>
-                        <li><?php esc_html_e('Custom Payment Branding', 'chatshop'); ?></li>
-                    </ul>
-                    <p>
+                        <?php esc_html_e('🚀 Unlock PayPal, Flutterwave, Razorpay, and more payment gateways with ChatShop Premium.', 'chatshop'); ?>
                         <a href="#" class="button button-primary"><?php esc_html_e('Upgrade Now', 'chatshop'); ?></a>
                     </p>
                 </div>
             </div>
         <?php endif; ?>
 
-        <!-- System Debug Information -->
-        <?php if (defined('WP_DEBUG') && WP_DEBUG) : ?>
-            <div class="chatshop-admin-section">
-                <h2><?php esc_html_e('Debug Information', 'chatshop'); ?></h2>
-                <p class="description"><?php esc_html_e('This debug information is only visible when WordPress debug mode is enabled.', 'chatshop'); ?></p>
-
-                <table class="form-table" role="presentation">
-                    <tr>
-                        <th scope="row"><?php esc_html_e('ChatShop Instance', 'chatshop'); ?></th>
-                        <td><code><?php echo $chatshop_instance ? 'Available' : 'Not Available'; ?></code></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Payment Manager', 'chatshop'); ?></th>
-                        <td><code><?php echo ($chatshop_instance && method_exists($chatshop_instance, 'get_payment_manager')) ? 'Available' : 'Not Available'; ?></code></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Gateway Count', 'chatshop'); ?></th>
-                        <td><code><?php echo count($gateways); ?></code></td>
-                    </tr>
-                    <tr>
-                        <th scope="row"><?php esc_html_e('Gateway Classes', 'chatshop'); ?></th>
-                        <td>
-                            <code>
-                                <?php
-                                if (class_exists('ChatShop\ChatShop_Paystack_Gateway')) {
-                                    echo 'Paystack: Available, ';
-                                } else {
-                                    echo 'Paystack: Missing, ';
-                                }
-
-                                if (class_exists('ChatShop\ChatShop_Payment_Manager')) {
-                                    echo 'Manager: Available, ';
-                                } else {
-                                    echo 'Manager: Missing, ';
-                                }
-
-                                if (class_exists('ChatShop\ChatShop_Payment_Factory')) {
-                                    echo 'Factory: Available';
-                                } else {
-                                    echo 'Factory: Missing';
-                                }
-                                ?>
-                            </code>
-                        </td>
-                    </tr>
-                </table>
-            </div>
-        <?php endif; ?>
-    </div>
+        <?php submit_button(); ?>
+    </form>
 </div>
 
-<!-- Test Gateway Modal -->
-<div id="chatshop-test-modal" class="chatshop-modal" style="display: none;">
-    <div class="chatshop-modal-content">
-        <div class="chatshop-modal-header">
-            <h3><?php esc_html_e('Test Gateway Connection', 'chatshop'); ?></h3>
-            <button type="button" class="chatshop-modal-close">&times;</button>
-        </div>
-        <div class="chatshop-modal-body">
-            <div class="chatshop-test-loading">
-                <p><?php esc_html_e('Testing connection...', 'chatshop'); ?></p>
-            </div>
-            <div class="chatshop-test-result" style="display: none;">
-                <!-- Results will be populated via JavaScript -->
-            </div>
-        </div>
-    </div>
-</div>
+<style>
+    .chatshop-payment-gateway {
+        background: #fff;
+        border: 1px solid #ccd0d4;
+        border-radius: 4px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
 
-<script type="text/javascript">
+    .chatshop-payment-gateway h2.title {
+        margin-top: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .gateway-logo img {
+        vertical-align: middle;
+    }
+
+    .gateway-status {
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-left: auto;
+    }
+
+    .gateway-status.enabled {
+        background: #d1e7dd;
+        color: #0a3622;
+    }
+
+    .gateway-status.disabled {
+        background: #f8d7da;
+        color: #58151c;
+    }
+
+    .api-keys-section {
+        background: #f9f9f9;
+        border: 1px solid #e1e1e1;
+        border-radius: 4px;
+        padding: 15px;
+        margin: 15px 0;
+    }
+
+    .test-connection-section {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #e1e1e1;
+    }
+
+    .test-result {
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: 4px;
+    }
+
+    .test-result.success {
+        background: #d1e7dd;
+        color: #0a3622;
+        border: 1px solid #a3cfbb;
+    }
+
+    .test-result.error {
+        background: #f8d7da;
+        color: #58151c;
+        border: 1px solid #f1aeb5;
+    }
+
+    .chatshop-premium-notice {
+        background: #fff;
+        border: 1px solid #ccd0d4;
+        border-radius: 4px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+</style>
+
+<script>
     jQuery(document).ready(function($) {
-        // Test Gateway Connection
-        $('.chatshop-test-gateway').on('click', function(e) {
-            e.preventDefault();
+        // Toggle API keys sections based on test mode
+        $('#paystack_test_mode').on('change', function() {
+            if ($(this).is(':checked')) {
+                $('#test-keys-section').show();
+                $('#live-keys-section').hide();
+            } else {
+                $('#test-keys-section').hide();
+                $('#live-keys-section').show();
+            }
+        });
 
-            var gateway = $(this).data('gateway');
-            var modal = $('#chatshop-test-modal');
+        // Copy webhook URL
+        $('#copy-webhook-url').on('click', function() {
+            var webhookUrl = $('#webhook_url');
+            webhookUrl.select();
+            document.execCommand('copy');
 
-            modal.show();
-            $('.chatshop-test-loading').show();
-            $('.chatshop-test-result').hide();
+            var button = $(this);
+            var originalText = button.text();
+            button.text('<?php esc_html_e('Copied!', 'chatshop'); ?>');
+
+            setTimeout(function() {
+                button.text(originalText);
+            }, 2000);
+        });
+
+        // Test connection
+        $('#test-paystack-connection').on('click', function() {
+            var button = $(this);
+            var resultDiv = $('#test-result');
+
+            button.prop('disabled', true).text('<?php esc_html_e('Testing...', 'chatshop'); ?>');
+            resultDiv.hide();
 
             $.ajax({
                 url: ajaxurl,
                 type: 'POST',
                 data: {
                     action: 'chatshop_test_gateway',
-                    gateway_id: gateway,
+                    gateway_id: 'paystack',
                     nonce: '<?php echo wp_create_nonce('chatshop_admin_nonce'); ?>'
                 },
                 success: function(response) {
-                    $('.chatshop-test-loading').hide();
-                    $('.chatshop-test-result').show();
-
                     if (response.success) {
-                        $('.chatshop-test-result').html(
-                            '<div class="notice notice-success inline"><p>' + response.data.message + '</p></div>'
-                        );
+                        resultDiv.removeClass('error').addClass('success')
+                            .html('<strong><?php esc_html_e('Success:', 'chatshop'); ?></strong> ' + response.data.message)
+                            .show();
                     } else {
-                        $('.chatshop-test-result').html(
-                            '<div class="notice notice-error inline"><p>' + (response.data ? response.data.message : response.message || '<?php esc_html_e('Connection test failed.', 'chatshop'); ?>') + '</p></div>'
-                        );
+                        resultDiv.removeClass('success').addClass('error')
+                            .html('<strong><?php esc_html_e('Error:', 'chatshop'); ?></strong> ' + response.data.message)
+                            .show();
                     }
                 },
                 error: function() {
-                    $('.chatshop-test-loading').hide();
-                    $('.chatshop-test-result').show().html(
-                        '<div class="notice notice-error inline"><p><?php esc_html_e('Connection test failed.', 'chatshop'); ?></p></div>'
-                    );
+                    resultDiv.removeClass('success').addClass('error')
+                        .html('<strong><?php esc_html_e('Error:', 'chatshop'); ?></strong> <?php esc_html_e('Failed to test connection. Please try again.', 'chatshop'); ?>')
+                        .show();
+                },
+                complete: function() {
+                    button.prop('disabled', false).text('<?php esc_html_e('Test Connection', 'chatshop'); ?>');
                 }
             });
-        });
-
-        // Close Modal
-        $('.chatshop-modal-close, .chatshop-modal').on('click', function(e) {
-            if (e.target === this) {
-                $('#chatshop-test-modal').hide();
-            }
-        });
-
-        // Copy Webhook URL
-        $('.chatshop-copy-webhook').on('click', function(e) {
-            e.preventDefault();
-
-            var webhook = $(this).data('webhook');
-            var button = $(this);
-
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(webhook).then(function() {
-                    var originalText = button.text();
-                    button.text('<?php esc_html_e('Copied!', 'chatshop'); ?>');
-
-                    setTimeout(function() {
-                        button.text(originalText);
-                    }, 2000);
-                });
-            } else {
-                // Fallback for older browsers
-                var textArea = document.createElement('textarea');
-                textArea.value = webhook;
-                document.body.appendChild(textArea);
-                textArea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textArea);
-
-                var originalText = button.text();
-                button.text('<?php esc_html_e('Copied!', 'chatshop'); ?>');
-
-                setTimeout(function() {
-                    button.text(originalText);
-                }, 2000);
-            }
-        });
-
-        // Smooth scroll to gateway configuration
-        $('.chatshop-configure-gateway').on('click', function(e) {
-            e.preventDefault();
-
-            var target = $(this).attr('href');
-            if ($(target).length) {
-                $('html, body').animate({
-                    scrollTop: $(target).offset().top - 50
-                }, 500);
-            }
         });
     });
 </script>

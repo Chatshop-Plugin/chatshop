@@ -1,104 +1,109 @@
 <?php
 
 /**
- * Admin functionality for ChatShop
+ * ChatShop Admin Class
  *
  * @package ChatShop
- * @since 1.0.0
+ * @since   1.0.0
  */
 
 namespace ChatShop;
 
-// Prevent direct access
-if (!defined('ABSPATH')) {
-    exit;
+// If this file is called directly, abort.
+if (!defined('WPINC')) {
+    die;
 }
 
 /**
- * Admin class
- *
- * @since 1.0.0
+ * Main admin class
  */
 class ChatShop_Admin
 {
     /**
-     * Current tab
+     * Admin menu handler
      *
-     * @var string
-     * @since 1.0.0
+     * @var ChatShop_Admin_Menu
      */
-    private $current_tab;
+    private $menu_handler;
 
     /**
-     * Admin menu pages
+     * Settings handler
      *
-     * @var array
-     * @since 1.0.0
+     * @var ChatShop_Settings
      */
-    private $admin_pages = array();
+    private $settings_handler;
 
     /**
-     * Constructor
+     * Initialize admin functionality
      *
      * @since 1.0.0
      */
     public function __construct()
     {
-        $this->current_tab = $this->get_current_tab();
-        $this->init_admin_pages();
+        $this->load_dependencies();
+        $this->init_handlers();
+        $this->init_hooks();
     }
 
     /**
-     * Initialize admin pages
+     * Load admin dependencies
      *
      * @since 1.0.0
      */
-    private function init_admin_pages()
+    private function load_dependencies()
     {
-        $this->admin_pages = array(
-            'dashboard' => array(
-                'title' => __('Dashboard', 'chatshop'),
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_dashboard_page'),
-                'icon' => 'dashicons-dashboard'
-            ),
-            'payments' => array(
-                'title' => __('Payment Settings', 'chatshop'),
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_payments_page'),
-                'icon' => 'dashicons-money-alt'
-            ),
-            'whatsapp' => array(
-                'title' => __('WhatsApp Settings', 'chatshop'),
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_whatsapp_page'),
-                'icon' => 'dashicons-phone'
-            ),
-            'analytics' => array(
-                'title' => __('Analytics', 'chatshop'),
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_analytics_page'),
-                'icon' => 'dashicons-chart-bar'
-            ),
-            'settings' => array(
-                'title' => __('General Settings', 'chatshop'),
-                'capability' => 'manage_options',
-                'callback' => array($this, 'render_general_settings_page'),
-                'icon' => 'dashicons-admin-settings'
-            )
-        );
+        require_once CHATSHOP_PLUGIN_DIR . 'admin/class-chatshop-admin-menu.php';
+        require_once CHATSHOP_PLUGIN_DIR . 'admin/class-chatshop-settings.php';
+    }
+
+    /**
+     * Initialize handlers
+     *
+     * @since 1.0.0
+     */
+    private function init_handlers()
+    {
+        $this->menu_handler = new ChatShop_Admin_Menu();
+        $this->settings_handler = new ChatShop_Settings();
+    }
+
+    /**
+     * Initialize admin hooks
+     *
+     * @since 1.0.0
+     */
+    private function init_hooks()
+    {
+        add_action('admin_init', array($this, 'init_settings'));
+        add_action('admin_notices', array($this, 'display_admin_notices'));
+        add_action('wp_ajax_chatshop_test_gateway', array($this, 'ajax_test_gateway'));
+        add_action('wp_ajax_chatshop_save_settings', array($this, 'ajax_save_settings'));
+        add_action('wp_ajax_chatshop_reset_settings', array($this, 'ajax_reset_settings'));
+        add_action('admin_post_chatshop_export_settings', array($this, 'export_settings'));
+        add_action('admin_post_chatshop_import_settings', array($this, 'import_settings'));
+    }
+
+    /**
+     * Initialize settings
+     *
+     * @since 1.0.0
+     */
+    public function init_settings()
+    {
+        // Settings are initialized in the ChatShop_Settings class
+        // This method can be used for additional initialization if needed
     }
 
     /**
      * Enqueue admin styles
      *
-     * @param string $hook_suffix Current admin page hook suffix
+     * @param string $hook Current admin page hook
      * @since 1.0.0
      */
-    public function enqueue_styles($hook_suffix)
+    public function enqueue_styles($hook)
     {
-        // Only load on ChatShop admin pages
-        if (!$this->is_chatshop_admin_page($hook_suffix)) {
+        // Only load on our admin pages
+        if (strpos($hook, 'chatshop') === false) {
             return;
         }
 
@@ -109,66 +114,48 @@ class ChatShop_Admin
             CHATSHOP_VERSION,
             'all'
         );
-
-        // Additional styles for specific pages
-        $current_page = $this->get_current_page();
-        if ($current_page && file_exists(CHATSHOP_PLUGIN_DIR . "admin/css/chatshop-{$current_page}.css")) {
-            wp_enqueue_style(
-                "chatshop-admin-{$current_page}",
-                CHATSHOP_PLUGIN_URL . "admin/css/chatshop-{$current_page}.css",
-                array('chatshop-admin'),
-                CHATSHOP_VERSION,
-                'all'
-            );
-        }
     }
 
     /**
      * Enqueue admin scripts
      *
-     * @param string $hook_suffix Current admin page hook suffix
+     * @param string $hook Current admin page hook
      * @since 1.0.0
      */
-    public function enqueue_scripts($hook_suffix)
+    public function enqueue_scripts($hook)
     {
-        // Only load on ChatShop admin pages
-        if (!$this->is_chatshop_admin_page($hook_suffix)) {
+        // Only load on our admin pages
+        if (strpos($hook, 'chatshop') === false) {
             return;
         }
 
         wp_enqueue_script(
             'chatshop-admin',
             CHATSHOP_PLUGIN_URL . 'admin/js/chatshop-admin.js',
-            array('jquery'),
+            array('jquery', 'wp-util'),
             CHATSHOP_VERSION,
             true
         );
 
-        // Localize script with admin data
-        wp_localize_script('chatshop-admin', 'chatshop_admin', array(
-            'ajax_url' => admin_url('admin-ajax.php'),
+        // Localize script with data
+        wp_localize_script('chatshop-admin', 'chatshopAdmin', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('chatshop_admin_nonce'),
+            'pluginUrl' => CHATSHOP_PLUGIN_URL,
             'strings' => array(
-                'confirm_delete' => __('Are you sure you want to delete this item?', 'chatshop'),
-                'save_success' => __('Settings saved successfully.', 'chatshop'),
-                'save_error' => __('Error saving settings. Please try again.', 'chatshop'),
-                'test_connection' => __('Testing connection...', 'chatshop'),
-                'connection_success' => __('Connection successful!', 'chatshop'),
-                'connection_failed' => __('Connection failed.', 'chatshop')
+                'saving' => __('Saving...', 'chatshop'),
+                'saved' => __('Settings saved successfully!', 'chatshop'),
+                'error' => __('An error occurred. Please try again.', 'chatshop'),
+                'testing' => __('Testing connection...', 'chatshop'),
+                'testSuccess' => __('Connection test successful!', 'chatshop'),
+                'testFailed' => __('Connection test failed. Please check your settings.', 'chatshop'),
+                'confirmReset' => __('Are you sure you want to reset these settings? This action cannot be undone.', 'chatshop'),
+                'resetting' => __('Resetting...', 'chatshop'),
+                'resetSuccess' => __('Settings reset successfully!', 'chatshop'),
+                'copied' => __('Copied to clipboard!', 'chatshop'),
+                'copyFailed' => __('Failed to copy. Please copy manually.', 'chatshop')
             )
         ));
-
-        // Additional scripts for specific pages
-        $current_page = $this->get_current_page();
-        if ($current_page && file_exists(CHATSHOP_PLUGIN_DIR . "admin/js/chatshop-{$current_page}.js")) {
-            wp_enqueue_script(
-                "chatshop-admin-{$current_page}",
-                CHATSHOP_PLUGIN_URL . "admin/js/chatshop-{$current_page}.js",
-                array('chatshop-admin'),
-                CHATSHOP_VERSION,
-                true
-            );
-        }
     }
 
     /**
@@ -178,76 +165,364 @@ class ChatShop_Admin
      */
     public function add_admin_menu()
     {
-        // Main menu page
-        add_menu_page(
-            __('ChatShop', 'chatshop'),
-            __('ChatShop', 'chatshop'),
-            'manage_options',
-            'chatshop',
-            array($this, 'render_dashboard_page'),
-            'dashicons-whatsapp',
-            30
-        );
-
-        // Sub-menu pages
-        foreach ($this->admin_pages as $page_slug => $page_config) {
-            add_submenu_page(
-                'chatshop',
-                $page_config['title'],
-                $page_config['title'],
-                $page_config['capability'],
-                'chatshop-' . $page_slug,
-                $page_config['callback']
-            );
-        }
-
-        // Remove duplicate main page from submenu
-        remove_submenu_page('chatshop', 'chatshop');
+        // Menu is handled by ChatShop_Admin_Menu class
     }
 
     /**
-     * Initialize settings
+     * Display admin notices
      *
      * @since 1.0.0
      */
-    public function init_settings()
+    public function display_admin_notices()
     {
-        // Register settings for each gateway
-        $gateways = chatshop_get_payment_gateways();
-        foreach ($gateways as $gateway_id => $gateway) {
-            register_setting(
-                "chatshop_{$gateway_id}_options",
-                "chatshop_{$gateway_id}_options",
-                array(
-                    'sanitize_callback' => array($this, 'sanitize_gateway_settings'),
-                    'default' => array()
-                )
-            );
+        $screen = get_current_screen();
+
+        if (!$screen || strpos($screen->id, 'chatshop') === false) {
+            return;
         }
 
-        // Register general settings
-        register_setting(
-            'chatshop_general_options',
-            'chatshop_general_options',
-            array(
-                'sanitize_callback' => array($this, 'sanitize_general_settings'),
-                'default' => array()
-            )
-        );
+        // Success notices
+        if (isset($_GET['settings-updated']) && $_GET['settings-updated'] === 'true') {
+            echo '<div class="notice notice-success is-dismissible">';
+            echo '<p>' . esc_html__('Settings saved successfully!', 'chatshop') . '</p>';
+            echo '</div>';
+        }
 
-        // Register WhatsApp settings
-        register_setting(
-            'chatshop_whatsapp_options',
-            'chatshop_whatsapp_options',
-            array(
-                'sanitize_callback' => array($this, 'sanitize_whatsapp_settings'),
-                'default' => array()
-            )
-        );
+        // Configuration warnings
+        $this->display_configuration_notices();
     }
 
     /**
-     * Handle AJAX requests
+     * Display configuration notices
+     *
+     * @since 1.0.0
+     */
+    private function display_configuration_notices()
+    {
+        $paystack_options = chatshop_get_option('paystack', '', array());
+
+        // Check if Paystack is enabled but not configured
+        if (!empty($paystack_options['enabled']) && !$this->is_paystack_configured()) {
+            echo '<div class="notice notice-warning is-dismissible">';
+            echo '<p>';
+            printf(
+                __('Paystack is enabled but not properly configured. Please %sconfigure your API keys%s to start processing payments.', 'chatshop'),
+                '<a href="' . esc_url(admin_url('admin.php?page=chatshop-payments')) . '">',
+                '</a>'
+            );
+            echo '</p>';
+            echo '</div>';
+        }
+
+        // Check SSL for live mode
+        if (!empty($paystack_options['enabled']) && empty($paystack_options['test_mode']) && !is_ssl()) {
+            echo '<div class="notice notice-error is-dismissible">';
+            echo '<p>';
+            echo esc_html__('⚠️ SSL certificate is required for live payment processing. Please install an SSL certificate.', 'chatshop');
+            echo '</p>';
+            echo '</div>';
+        }
+    }
+
+    /**
+     * Check if Paystack is properly configured
+     *
+     * @return bool Configuration status
+     * @since 1.0.0
+     */
+    private function is_paystack_configured()
+    {
+        $validation = $this->settings_handler->validate_paystack_config();
+        return $validation['valid'];
+    }
+
+    /**
+     * Handle AJAX request for testing gateway connection
+     *
+     * @since 1.0.0
+     */
+    public function ajax_test_gateway()
+    {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Security check failed.', 'chatshop')));
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Insufficient permissions.', 'chatshop')));
+        }
+
+        $gateway_id = sanitize_key($_POST['gateway_id'] ?? '');
+
+        if ($gateway_id !== 'paystack') {
+            wp_send_json_error(array('message' => __('Unsupported gateway.', 'chatshop')));
+        }
+
+        // Get payment manager
+        $payment_manager = chatshop_get_payment_manager();
+
+        if (!$payment_manager) {
+            wp_send_json_error(array('message' => __('Payment system not available.', 'chatshop')));
+        }
+
+        // Test gateway connection
+        $result = $this->test_paystack_connection();
+
+        if ($result['success']) {
+            wp_send_json_success(array('message' => $result['message']));
+        } else {
+            wp_send_json_error(array('message' => $result['message']));
+        }
+    }
+
+    /**
+     * Test Paystack connection
+     *
+     * @return array Test result
+     * @since 1.0.0
+     */
+    private function test_paystack_connection()
+    {
+        $paystack_options = chatshop_get_option('paystack', '', array());
+        $test_mode = $paystack_options['test_mode'] ?? true;
+
+        // Validate configuration first
+        $validation = $this->settings_handler->validate_paystack_config($test_mode);
+
+        if (!$validation['valid']) {
+            return array(
+                'success' => false,
+                'message' => $validation['message']
+            );
+        }
+
+        // Get API keys
+        $keys = $this->settings_handler->get_paystack_keys($test_mode);
+
+        if (empty($keys['secret_key'])) {
+            return array(
+                'success' => false,
+                'message' => __('Secret key not found.', 'chatshop')
+            );
+        }
+
+        // Test API call to Paystack
+        $api_url = 'https://api.paystack.co/transaction/verify/invalid_reference';
+
+        $response = wp_remote_get($api_url, array(
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $keys['secret_key'],
+                'Content-Type' => 'application/json'
+            ),
+            'timeout' => 30
+        ));
+
+        if (is_wp_error($response)) {
+            return array(
+                'success' => false,
+                'message' => sprintf(__('Connection failed: %s', 'chatshop'), $response->get_error_message())
+            );
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+
+        // We expect a 404 for invalid reference, which means API is reachable
+        if ($response_code === 404) {
+            return array(
+                'success' => true,
+                'message' => sprintf(__('Connection successful! %s mode is working correctly.', 'chatshop'), $test_mode ? 'Test' : 'Live')
+            );
+        } elseif ($response_code === 401) {
+            return array(
+                'success' => false,
+                'message' => __('Authentication failed. Please check your API keys.', 'chatshop')
+            );
+        } else {
+            return array(
+                'success' => false,
+                'message' => sprintf(__('Unexpected response code: %d', 'chatshop'), $response_code)
+            );
+        }
+    }
+
+    /**
+     * Handle AJAX request for saving settings
+     *
+     * @since 1.0.0
+     */
+    public function ajax_save_settings()
+    {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Security check failed.', 'chatshop')));
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Insufficient permissions.', 'chatshop')));
+        }
+
+        $settings_group = sanitize_key($_POST['group'] ?? '');
+        $settings_data = $_POST['data'] ?? array();
+
+        if (empty($settings_group)) {
+            wp_send_json_error(array('message' => __('Invalid settings group.', 'chatshop')));
+        }
+
+        // Save settings based on group
+        $option_name = "chatshop_{$settings_group}_options";
+
+        // Sanitize based on group
+        switch ($settings_group) {
+            case 'paystack':
+                $settings_data = $this->settings_handler->sanitize_paystack_settings($settings_data);
+                break;
+            case 'general':
+                $settings_data = $this->settings_handler->sanitize_general_settings($settings_data);
+                break;
+            case 'whatsapp':
+                $settings_data = $this->settings_handler->sanitize_whatsapp_settings($settings_data);
+                break;
+            case 'analytics':
+                $settings_data = $this->settings_handler->sanitize_analytics_settings($settings_data);
+                break;
+            default:
+                wp_send_json_error(array('message' => __('Invalid settings group.', 'chatshop')));
+        }
+
+        // Update option
+        $result = update_option($option_name, $settings_data);
+
+        if ($result) {
+            chatshop_log("Settings saved for group: {$settings_group}", 'info');
+            wp_send_json_success(array('message' => __('Settings saved successfully!', 'chatshop')));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to save settings.', 'chatshop')));
+        }
+    }
+
+    /**
+     * Handle AJAX request for resetting settings
+     *
+     * @since 1.0.0
+     */
+    public function ajax_reset_settings()
+    {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_send_json_error(array('message' => __('Security check failed.', 'chatshop')));
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => __('Insufficient permissions.', 'chatshop')));
+        }
+
+        $settings_group = sanitize_key($_POST['group'] ?? '');
+
+        if (empty($settings_group)) {
+            wp_send_json_error(array('message' => __('Invalid settings group.', 'chatshop')));
+        }
+
+        // Reset settings
+        $result = $this->settings_handler->reset_settings($settings_group);
+
+        if ($result) {
+            wp_send_json_success(array('message' => __('Settings reset successfully!', 'chatshop')));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to reset settings.', 'chatshop')));
+        }
+    }
+
+    /**
+     * Export settings
+     *
+     * @since 1.0.0
+     */
+    public function export_settings()
+    {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'chatshop_export_settings')) {
+            wp_die(__('Security check failed.', 'chatshop'));
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', 'chatshop'));
+        }
+
+        $settings = $this->settings_handler->export_settings();
+
+        // Set headers for download
+        header('Content-Type: application/json');
+        header('Content-Disposition: attachment; filename="chatshop-settings-' . date('Y-m-d') . '.json"');
+        header('Content-Length: ' . strlen(json_encode($settings)));
+
+        echo json_encode($settings, JSON_PRETTY_PRINT);
+        exit;
+    }
+
+    /**
+     * Import settings
+     *
+     * @since 1.0.0
+     */
+    public function import_settings()
+    {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'chatshop_import_settings')) {
+            wp_die(__('Security check failed.', 'chatshop'));
+        }
+
+        // Check permissions
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions.', 'chatshop'));
+        }
+
+        // Check if file was uploaded
+        if (!isset($_FILES['settings_file']) || $_FILES['settings_file']['error'] !== UPLOAD_ERR_OK) {
+            wp_redirect(add_query_arg(array(
+                'page' => 'chatshop-general',
+                'import' => 'error',
+                'message' => urlencode(__('File upload failed.', 'chatshop'))
+            ), admin_url('admin.php')));
+            exit;
+        }
+
+        // Read and decode file
+        $file_content = file_get_contents($_FILES['settings_file']['tmp_name']);
+        $settings = json_decode($file_content, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            wp_redirect(add_query_arg(array(
+                'page' => 'chatshop-general',
+                'import' => 'error',
+                'message' => urlencode(__('Invalid JSON file.', 'chatshop'))
+            ), admin_url('admin.php')));
+            exit;
+        }
+
+        // Import settings
+        $result = $this->settings_handler->import_settings($settings);
+
+        if ($result) {
+            wp_redirect(add_query_arg(array(
+                'page' => 'chatshop-general',
+                'import' => 'success'
+            ), admin_url('admin.php')));
+        } else {
+            wp_redirect(add_query_arg(array(
+                'page' => 'chatshop-general',
+                'import' => 'error',
+                'message' => urlencode(__('Failed to import settings.', 'chatshop'))
+            ), admin_url('admin.php')));
+        }
+        exit;
+    }
+
+    /**
+     * Handle general AJAX requests
      *
      * @since 1.0.0
      */
@@ -255,612 +530,79 @@ class ChatShop_Admin
     {
         // Verify nonce
         if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
-            wp_die(__('Security check failed', 'chatshop'));
+            wp_send_json_error(array('message' => __('Security check failed.', 'chatshop')));
         }
 
-        // Check user capabilities
+        // Check permissions
         if (!current_user_can('manage_options')) {
-            wp_die(__('Insufficient permissions', 'chatshop'));
+            wp_send_json_error(array('message' => __('Insufficient permissions.', 'chatshop')));
         }
 
-        $action = sanitize_text_field($_POST['action'] ?? '');
+        $action = sanitize_key($_POST['chatshop_action'] ?? '');
 
         switch ($action) {
-            case 'chatshop_test_gateway':
-                $this->ajax_test_gateway();
+            case 'get_stats':
+                $this->ajax_get_dashboard_stats();
                 break;
 
-            case 'chatshop_save_settings':
-                $this->ajax_save_settings();
+            case 'refresh_webhook_url':
+                $this->ajax_refresh_webhook_url();
                 break;
 
             default:
-                wp_send_json_error(__('Invalid action', 'chatshop'));
+                wp_send_json_error(array('message' => __('Unknown action.', 'chatshop')));
         }
     }
 
     /**
-     * Render dashboard page
+     * Get dashboard statistics
      *
      * @since 1.0.0
      */
-    public function render_dashboard_page()
+    private function ajax_get_dashboard_stats()
     {
-        $this->render_admin_page('dashboard');
-    }
-
-    /**
-     * Render payments page
-     *
-     * @since 1.0.0
-     */
-    public function render_payments_page()
-    {
-        $this->render_admin_page('payments');
-    }
-
-    /**
-     * Render WhatsApp page
-     *
-     * @since 1.0.0
-     */
-    public function render_whatsapp_page()
-    {
-        $this->render_admin_page('whatsapp');
-    }
-
-    /**
-     * Render analytics page
-     *
-     * @since 1.0.0
-     */
-    public function render_analytics_page()
-    {
-        $this->render_admin_page('analytics');
-    }
-
-    /**
-     * Render general settings page
-     *
-     * @since 1.0.0
-     */
-    public function render_general_settings_page()
-    {
-        $this->render_admin_page('settings');
-    }
-
-    /**
-     * Render admin page
-     *
-     * @param string $page Page slug
-     * @since 1.0.0
-     */
-    private function render_admin_page($page)
-    {
-        // Set page title
-        if (isset($this->admin_pages[$page])) {
-            $page_title = $this->admin_pages[$page]['title'];
-        } else {
-            $page_title = __('ChatShop', 'chatshop');
-        }
-
-        // Include page template
-        $template_file = CHATSHOP_PLUGIN_DIR . "admin/partials/{$page}.php";
-        $settings_template_file = CHATSHOP_PLUGIN_DIR . "admin/partials/settings-{$page}.php";
-
-        if (file_exists($settings_template_file)) {
-            include_once $settings_template_file;
-        } elseif (file_exists($template_file)) {
-            include_once $template_file;
-        } else {
-            // Fallback content
-            echo '<div class="wrap">';
-            echo '<h1>' . esc_html($page_title) . '</h1>';
-            echo '<div class="notice notice-warning"><p>';
-            printf(
-                /* translators: %s: page name */
-                esc_html__('The %s page template is not available yet.', 'chatshop'),
-                esc_html($page_title)
-            );
-            echo '</p></div>';
-            echo '</div>';
-        }
-    }
-
-    /**
-     * Get current tab
-     *
-     * @return string Current tab
-     * @since 1.0.0
-     */
-    private function get_current_tab()
-    {
-        return sanitize_text_field($_GET['tab'] ?? 'general');
-    }
-
-    /**
-     * Get current page
-     *
-     * @return string|null Current page slug
-     * @since 1.0.0
-     */
-    private function get_current_page()
-    {
-        $current_screen = get_current_screen();
-        if (!$current_screen) {
-            return null;
-        }
-
-        $page_id = $current_screen->id;
-
-        // Extract page slug from screen ID
-        if (strpos($page_id, 'chatshop-') === 0) {
-            return str_replace('chatshop-', '', $page_id);
-        }
-
-        if ($page_id === 'toplevel_page_chatshop') {
-            return 'dashboard';
-        }
-
-        return null;
-    }
-
-    /**
-     * Check if current page is a ChatShop admin page
-     *
-     * @param string $hook_suffix Current admin page hook suffix
-     * @return bool Whether current page is ChatShop admin page
-     * @since 1.0.0
-     */
-    private function is_chatshop_admin_page($hook_suffix)
-    {
-        $chatshop_pages = array(
-            'toplevel_page_chatshop',
-            'chatshop_page_chatshop-dashboard',
-            'chatshop_page_chatshop-payments',
-            'chatshop_page_chatshop-whatsapp',
-            'chatshop_page_chatshop-analytics',
-            'chatshop_page_chatshop-settings'
+        // This would typically fetch real statistics
+        // For now, return placeholder data
+        $stats = array(
+            'total_transactions' => 0,
+            'total_revenue' => 0,
+            'whatsapp_messages' => 0,
+            'conversion_rate' => 0
         );
 
-        return in_array($hook_suffix, $chatshop_pages, true);
+        wp_send_json_success($stats);
     }
 
     /**
-     * Sanitize gateway settings
+     * Refresh webhook URL
      *
-     * @param array $input Raw input data
-     * @return array Sanitized settings
      * @since 1.0.0
      */
-    public function sanitize_gateway_settings($input)
+    private function ajax_refresh_webhook_url()
     {
-        if (!is_array($input)) {
-            return array();
-        }
-
-        $sanitized = array();
-
-        foreach ($input as $key => $value) {
-            $clean_key = sanitize_key($key);
-
-            switch ($clean_key) {
-                case 'enabled':
-                case 'test_mode':
-                    $sanitized[$clean_key] = ($value === 'yes') ? 'yes' : 'no';
-                    break;
-
-                case 'test_secret_key':
-                case 'live_secret_key':
-                    // Encrypt sensitive keys
-                    $sanitized[$clean_key] = $this->encrypt_api_key(sanitize_text_field($value));
-                    break;
-
-                case 'test_public_key':
-                case 'live_public_key':
-                case 'client_id':
-                case 'key_id':
-                    $sanitized[$clean_key] = sanitize_text_field($value);
-                    break;
-
-                default:
-                    $sanitized[$clean_key] = sanitize_text_field($value);
-                    break;
-            }
-        }
-
-        return $sanitized;
+        $webhook_url = home_url('/wp-admin/admin-ajax.php?action=chatshop_webhook&gateway=paystack');
+        wp_send_json_success(array('webhook_url' => $webhook_url));
     }
 
     /**
-     * Sanitize general settings
+     * Get settings handler
      *
-     * @param array $input Raw input data
-     * @return array Sanitized settings
+     * @return ChatShop_Settings
      * @since 1.0.0
      */
-    public function sanitize_general_settings($input)
+    public function get_settings_handler()
     {
-        if (!is_array($input)) {
-            return array();
-        }
-
-        $sanitized = array();
-
-        foreach ($input as $key => $value) {
-            $clean_key = sanitize_key($key);
-
-            switch ($clean_key) {
-                case 'plugin_enabled':
-                case 'debug_mode':
-                case 'enable_logging':
-                    $sanitized[$clean_key] = ($value === 'yes') ? 'yes' : 'no';
-                    break;
-
-                case 'currency':
-                    $sanitized[$clean_key] = strtoupper(sanitize_text_field($value));
-                    break;
-
-                case 'company_name':
-                case 'support_email':
-                    $sanitized[$clean_key] = sanitize_text_field($value);
-                    break;
-
-                case 'callback_url':
-                case 'return_url':
-                    $sanitized[$clean_key] = esc_url_raw($value);
-                    break;
-
-                default:
-                    $sanitized[$clean_key] = sanitize_text_field($value);
-                    break;
-            }
-        }
-
-        return $sanitized;
+        return $this->settings_handler;
     }
 
     /**
-     * Sanitize WhatsApp settings
+     * Get menu handler
      *
-     * @param array $input Raw input data
-     * @return array Sanitized settings
+     * @return ChatShop_Admin_Menu
      * @since 1.0.0
      */
-    public function sanitize_whatsapp_settings($input)
+    public function get_menu_handler()
     {
-        if (!is_array($input)) {
-            return array();
-        }
-
-        $sanitized = array();
-
-        foreach ($input as $key => $value) {
-            $clean_key = sanitize_key($key);
-
-            switch ($clean_key) {
-                case 'enabled':
-                case 'auto_send_receipts':
-                case 'enable_notifications':
-                    $sanitized[$clean_key] = ($value === 'yes') ? 'yes' : 'no';
-                    break;
-
-                case 'phone_number':
-                    $sanitized[$clean_key] = sanitize_text_field($value);
-                    break;
-
-                case 'api_token':
-                case 'webhook_secret':
-                    $sanitized[$clean_key] = $this->encrypt_api_key(sanitize_text_field($value));
-                    break;
-
-                case 'business_name':
-                case 'welcome_message':
-                    $sanitized[$clean_key] = sanitize_textarea_field($value);
-                    break;
-
-                default:
-                    $sanitized[$clean_key] = sanitize_text_field($value);
-                    break;
-            }
-        }
-
-        return $sanitized;
-    }
-
-    /**
-     * Encrypt API key
-     *
-     * @param string $key API key to encrypt
-     * @return string Encrypted key
-     * @since 1.0.0
-     */
-    private function encrypt_api_key($key)
-    {
-        if (empty($key)) {
-            return '';
-        }
-
-        $encryption_key = wp_salt('auth');
-
-        try {
-            return openssl_encrypt(
-                $key,
-                'AES-256-CBC',
-                $encryption_key,
-                0,
-                substr($encryption_key, 0, 16)
-            );
-        } catch (Exception $e) {
-            error_log('ChatShop: Failed to encrypt API key - ' . $e->getMessage());
-            return $key; // Return unencrypted as fallback
-        }
-    }
-
-    /**
-     * AJAX test gateway connection
-     *
-     * @since 1.0.0
-     */
-    private function ajax_test_gateway()
-    {
-        $gateway_id = sanitize_key($_POST['gateway_id'] ?? '');
-
-        if (empty($gateway_id)) {
-            wp_send_json_error(__('Gateway ID is required', 'chatshop'));
-        }
-
-        $gateways = chatshop_get_payment_gateways();
-
-        if (!isset($gateways[$gateway_id])) {
-            wp_send_json_error(__('Gateway not found', 'chatshop'));
-        }
-
-        $gateway = $gateways[$gateway_id];
-
-        if (!method_exists($gateway, 'test_connection')) {
-            wp_send_json_error(__('Gateway does not support connection testing', 'chatshop'));
-        }
-
-        $result = $gateway->test_connection();
-
-        if ($result['success']) {
-            wp_send_json_success($result);
-        } else {
-            wp_send_json_error($result);
-        }
-    }
-
-    /**
-     * AJAX save settings
-     *
-     * @since 1.0.0
-     */
-    private function ajax_save_settings()
-    {
-        $settings_group = sanitize_text_field($_POST['settings_group'] ?? '');
-        $settings_data = $_POST['settings_data'] ?? array();
-
-        if (empty($settings_group)) {
-            wp_send_json_error(__('Settings group is required', 'chatshop'));
-        }
-
-        // Sanitize based on settings group
-        switch ($settings_group) {
-            case 'general':
-                $sanitized_data = $this->sanitize_general_settings($settings_data);
-                break;
-
-            case 'whatsapp':
-                $sanitized_data = $this->sanitize_whatsapp_settings($settings_data);
-                break;
-
-            default:
-                // Assume it's a gateway settings group
-                $sanitized_data = $this->sanitize_gateway_settings($settings_data);
-                break;
-        }
-
-        $option_name = "chatshop_{$settings_group}_options";
-        $result = update_option($option_name, $sanitized_data);
-
-        if ($result) {
-            wp_send_json_success(array(
-                'message' => __('Settings saved successfully', 'chatshop')
-            ));
-        } else {
-            wp_send_json_error(array(
-                'message' => __('Failed to save settings', 'chatshop')
-            ));
-        }
-    }
-
-    /**
-     * Add admin notices
-     *
-     * @since 1.0.0
-     */
-    public function add_admin_notices()
-    {
-        // Check if plugin is properly configured
-        if (!$this->is_plugin_configured()) {
-            $this->show_configuration_notice();
-        }
-
-        // Check for missing dependencies
-        $missing_deps = $this->check_dependencies();
-        if (!empty($missing_deps)) {
-            $this->show_dependency_notice($missing_deps);
-        }
-
-        // Show premium upgrade notice
-        if (!chatshop_is_premium_feature_available('multiple_gateways')) {
-            $this->show_premium_notice();
-        }
-    }
-
-    /**
-     * Check if plugin is properly configured
-     *
-     * @return bool Configuration status
-     * @since 1.0.0
-     */
-    private function is_plugin_configured()
-    {
-        $gateways = chatshop_get_payment_gateways();
-
-        if (empty($gateways)) {
-            return false;
-        }
-
-        foreach ($gateways as $gateway) {
-            if ($gateway->is_enabled() && method_exists($gateway, 'is_configured')) {
-                if ($gateway->is_configured()) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Check plugin dependencies
-     *
-     * @return array Missing dependencies
-     * @since 1.0.0
-     */
-    private function check_dependencies()
-    {
-        $missing = array();
-
-        // Check PHP version
-        if (version_compare(PHP_VERSION, '7.4', '<')) {
-            $missing[] = sprintf(__('PHP 7.4 or higher (current: %s)', 'chatshop'), PHP_VERSION);
-        }
-
-        // Check WordPress version
-        if (version_compare(get_bloginfo('version'), '5.0', '<')) {
-            $missing[] = sprintf(__('WordPress 5.0 or higher (current: %s)', 'chatshop'), get_bloginfo('version'));
-        }
-
-        // Check WooCommerce if required
-        if (!class_exists('WooCommerce')) {
-            $missing[] = __('WooCommerce plugin', 'chatshop');
-        }
-
-        return $missing;
-    }
-
-    /**
-     * Show configuration notice
-     *
-     * @since 1.0.0
-     */
-    private function show_configuration_notice()
-    {
-?>
-        <div class="notice notice-warning is-dismissible">
-            <p>
-                <strong><?php esc_html_e('ChatShop Configuration Required', 'chatshop'); ?></strong>
-            </p>
-            <p>
-                <?php esc_html_e('Please configure at least one payment gateway to start accepting payments.', 'chatshop'); ?>
-                <a href="<?php echo esc_url(admin_url('admin.php?page=chatshop-payments')); ?>" class="button button-primary">
-                    <?php esc_html_e('Configure Now', 'chatshop'); ?>
-                </a>
-            </p>
-        </div>
-    <?php
-    }
-
-    /**
-     * Show dependency notice
-     *
-     * @param array $missing_deps Missing dependencies
-     * @since 1.0.0
-     */
-    private function show_dependency_notice($missing_deps)
-    {
-    ?>
-        <div class="notice notice-error">
-            <p>
-                <strong><?php esc_html_e('ChatShop Requirements Not Met', 'chatshop'); ?></strong>
-            </p>
-            <p><?php esc_html_e('The following requirements are missing:', 'chatshop'); ?></p>
-            <ul>
-                <?php foreach ($missing_deps as $dep) : ?>
-                    <li><?php echo esc_html($dep); ?></li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
-    <?php
-    }
-
-    /**
-     * Show premium notice
-     *
-     * @since 1.0.0
-     */
-    private function show_premium_notice()
-    {
-        // Only show on ChatShop pages
-        $current_screen = get_current_screen();
-        if (!$current_screen || strpos($current_screen->id, 'chatshop') === false) {
-            return;
-        }
-
-        // Don't show if user has dismissed it recently
-        $dismissed = get_user_meta(get_current_user_id(), 'chatshop_premium_notice_dismissed', true);
-        if ($dismissed && (time() - $dismissed) < WEEK_IN_SECONDS) {
-            return;
-        }
-
-    ?>
-        <div class="notice notice-info is-dismissible chatshop-premium-notice">
-            <p>
-                <strong><?php esc_html_e('Unlock ChatShop Premium Features', 'chatshop'); ?></strong>
-            </p>
-            <p>
-                <?php esc_html_e('Get access to multiple payment gateways, advanced analytics, and premium support.', 'chatshop'); ?>
-                <a href="#" class="button button-primary"><?php esc_html_e('Upgrade Now', 'chatshop'); ?></a>
-                <a href="#" class="button button-secondary chatshop-dismiss-notice"><?php esc_html_e('Maybe Later', 'chatshop'); ?></a>
-            </p>
-        </div>
-
-        <script type="text/javascript">
-            jQuery(document).ready(function($) {
-                $('.chatshop-dismiss-notice').on('click', function(e) {
-                    e.preventDefault();
-
-                    $.ajax({
-                        url: ajaxurl,
-                        type: 'POST',
-                        data: {
-                            action: 'chatshop_dismiss_premium_notice',
-                            nonce: '<?php echo wp_create_nonce('chatshop_admin_nonce'); ?>'
-                        }
-                    });
-
-                    $('.chatshop-premium-notice').fadeOut();
-                });
-            });
-        </script>
-<?php
-    }
-
-    /**
-     * Handle dismiss premium notice AJAX
-     *
-     * @since 1.0.0
-     */
-    public function ajax_dismiss_premium_notice()
-    {
-        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
-            wp_die(__('Security check failed', 'chatshop'));
-        }
-
-        update_user_meta(get_current_user_id(), 'chatshop_premium_notice_dismissed', time());
-        wp_send_json_success();
+        return $this->menu_handler;
     }
 }
