@@ -43,8 +43,22 @@ $premium_available = chatshop_is_premium_feature_available('multiple_gateways');
         <!-- Paystack Configuration -->
         <div class="chatshop-payment-gateway" id="paystack-settings">
             <h2 class="title">
-                <span class="gateway-logo">
-                    <img src="<?php echo esc_url(CHATSHOP_PLUGIN_URL . 'assets/icons/paystack.svg'); ?>" alt="Paystack" width="24" height="24">
+                <span class="gateway-logo paystack-logo">
+                    <?php
+                    // Check if custom Paystack SVG exists, otherwise use inline SVG
+                    $paystack_svg_path = CHATSHOP_PLUGIN_DIR . 'assets/icons/paystack.svg';
+                    if (file_exists($paystack_svg_path)) {
+                        echo '<img src="' . esc_url(CHATSHOP_PLUGIN_URL . 'assets/icons/paystack.svg') . '" alt="Paystack" width="24" height="24">';
+                    } else {
+                        // Inline Paystack SVG as fallback
+                        echo '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M8.5 16.5L15.5 9.5" stroke="#00C3F7" stroke-width="2" stroke-linecap="round"/>
+                                <path d="M8.5 13L15.5 6" stroke="#00C3F7" stroke-width="2" stroke-linecap="round"/>
+                                <path d="M8.5 20L15.5 13" stroke="#00C3F7" stroke-width="2" stroke-linecap="round"/>
+                                <circle cx="12" cy="12" r="11" stroke="#00C3F7" stroke-width="2"/>
+                              </svg>';
+                    }
+                    ?>
                 </span>
                 <?php esc_html_e('Paystack Payment Gateway', 'chatshop'); ?>
                 <span class="gateway-status <?php echo $paystack_enabled ? 'enabled' : 'disabled'; ?>">
