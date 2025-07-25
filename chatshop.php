@@ -34,6 +34,11 @@ define('CHATSHOP_PLUGIN_FILE', __FILE__);
 define('CHATSHOP_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
 /**
+ * Load global helper functions FIRST (required by other classes)
+ */
+require_once CHATSHOP_PLUGIN_DIR . 'includes/chatshop-global-functions.php';
+
+/**
  * Load core classes
  */
 require_once CHATSHOP_PLUGIN_DIR . 'includes/class-chatshop-loader.php';
@@ -340,8 +345,10 @@ final class ChatShop
             'contact_import_export' => isset($premium_options['contact_import_export']) ? (bool) $premium_options['contact_import_export'] : false,
             'bulk_messaging' => isset($premium_options['bulk_messaging']) ? (bool) $premium_options['bulk_messaging'] : false,
             'advanced_analytics' => isset($premium_options['advanced_analytics']) ? (bool) $premium_options['advanced_analytics'] : false,
-            'analytics' => isset($premium_options['analytics']) ? (bool) $premium_options['analytics'] : false, // ANALYTICS FEATURE
-            'multiple_gateways' => isset($premium_options['multiple_gateways']) ? (bool) $premium_options['multiple_gateways'] : false,
+            'analytics' => isset($premium_options['analytics']) ? (bool) $premium_options['analytics'] : true, // Basic analytics enabled by default
+            'whatsapp_automation' => isset($premium_options['whatsapp_automation']) ? (bool) $premium_options['whatsapp_automation'] : false,
+            'multi_gateway' => isset($premium_options['multi_gateway']) ? (bool) $premium_options['multi_gateway'] : true, // Multi-gateway enabled by default
+            'custom_templates' => isset($premium_options['custom_templates']) ? (bool) $premium_options['custom_templates'] : false
         );
     }
 
@@ -353,34 +360,6 @@ final class ChatShop
     private function init_component_system()
     {
         $this->component_loader = new ChatShop_Component_Loader();
-
-        // Register contact management component
-        $this->component_loader->get_registry()->register_component(array(
-            'id' => 'contact_manager',
-            'name' => __('Contact Manager', 'chatshop'),
-            'description' => __('Manage WhatsApp contacts with import/export capabilities', 'chatshop'),
-            'path' => CHATSHOP_PLUGIN_DIR . 'components/whatsapp/',
-            'main_file' => 'class-chatshop-contact-manager.php',
-            'class_name' => 'ChatShop_Contact_Manager',
-            'dependencies' => array(),
-            'version' => '1.0.0',
-            'enabled' => true
-        ));
-
-        // Register analytics component - ANALYTICS COMPONENT
-        $this->component_loader->get_registry()->register_component(array(
-            'id' => 'analytics',
-            'name' => __('Analytics Dashboard', 'chatshop'),
-            'description' => __('Premium analytics with WhatsApp-to-payment conversion tracking and revenue attribution', 'chatshop'),
-            'path' => CHATSHOP_PLUGIN_DIR . 'components/analytics/',
-            'main_file' => 'class-chatshop-analytics.php',
-            'class_name' => 'ChatShop_Analytics',
-            'dependencies' => array(),
-            'version' => '1.0.0',
-            'enabled' => true
-        ));
-
-        chatshop_log('Component system initialized successfully', 'info');
     }
 
     /**
@@ -390,86 +369,32 @@ final class ChatShop
      */
     private function init_payment_system()
     {
-        // Check if payment classes are available
-        if (!class_exists('ChatShop\ChatShop_Payment_Factory')) {
-            chatshop_log('Payment Factory class not found, skipping payment system initialization', 'warning');
-            return;
-        }
-
-        if (!class_exists('ChatShop\ChatShop_Payment_Manager')) {
-            chatshop_log('Payment Manager class not found, skipping payment system initialization', 'warning');
-            return;
-        }
-
-        try {
-            // Initialize payment factory
-            ChatShop_Payment_Factory::init();
-
-            // Initialize payment manager
+        if (class_exists('ChatShop_Payment_Manager')) {
             $this->payment_manager = new ChatShop_Payment_Manager();
-
-            chatshop_log('Payment system initialized successfully', 'info');
-        } catch (\Exception $e) {
-            chatshop_log('Payment system initialization failed: ' . $e->getMessage(), 'error');
-            $this->payment_manager = null;
         }
     }
 
     /**
-     * Initialize contact management system
+     * Initialize contact system - CONTACT SYSTEM INITIALIZATION
      *
      * @since 1.0.0
      */
     private function init_contact_system()
     {
-        // Check if contact manager class is available
-        if (!class_exists('ChatShop\ChatShop_Contact_Manager')) {
-            chatshop_log('Contact Manager class not found, skipping contact system initialization', 'warning');
-            return;
-        }
-
-        try {
-            // Load contact manager component
-            $contact_component = $this->component_loader->get_component_instance('contact_manager');
-
-            if ($contact_component) {
-                $this->contact_manager = $contact_component;
-                chatshop_log('Contact management system initialized successfully', 'info');
-            } else {
-                chatshop_log('Failed to load contact manager component', 'error');
-            }
-        } catch (\Exception $e) {
-            chatshop_log('Contact system initialization failed: ' . $e->getMessage(), 'error');
-            $this->contact_manager = null;
+        if (class_exists('ChatShop_Contact_Manager')) {
+            $this->contact_manager = new ChatShop_Contact_Manager();
         }
     }
 
     /**
-     * Initialize analytics system - ANALYTICS INITIALIZATION
+     * Initialize analytics system - ANALYTICS SYSTEM INITIALIZATION
      *
      * @since 1.0.0
      */
     private function init_analytics_system()
     {
-        // Check if analytics class is available
-        if (!class_exists('ChatShop\ChatShop_Analytics')) {
-            chatshop_log('Analytics class not found, skipping analytics system initialization', 'warning');
-            return;
-        }
-
-        try {
-            // Load analytics component
-            $analytics_component = $this->component_loader->get_component_instance('analytics');
-
-            if ($analytics_component) {
-                $this->analytics = $analytics_component;
-                chatshop_log('Analytics system initialized successfully', 'info');
-            } else {
-                chatshop_log('Failed to load analytics component', 'error');
-            }
-        } catch (\Exception $e) {
-            chatshop_log('Analytics system initialization failed: ' . $e->getMessage(), 'error');
-            $this->analytics = null;
+        if (class_exists('ChatShop_Analytics') && $this->is_premium_feature_available('analytics')) {
+            $this->analytics = new ChatShop_Analytics();
         }
     }
 
@@ -482,24 +407,57 @@ final class ChatShop
     {
         $gateways_dir = CHATSHOP_PLUGIN_DIR . 'components/payment/gateways/';
 
-        if (is_dir($gateways_dir)) {
-            $gateway_dirs = glob($gateways_dir . '*', GLOB_ONLYDIR);
+        // Load Paystack gateway
+        $paystack_files = array(
+            'paystack/class-chatshop-paystack-api.php',
+            'paystack/class-chatshop-paystack-gateway.php',
+            'paystack/class-chatshop-paystack-webhook.php'
+        );
 
-            foreach ($gateway_dirs as $gateway_dir) {
-                $gateway_id = basename($gateway_dir);
-                $gateway_files = array(
-                    $gateway_dir . '/class-chatshop-' . $gateway_id . '-gateway.php',
-                    $gateway_dir . '/class-' . $gateway_id . '-gateway.php'
-                );
+        foreach ($paystack_files as $file) {
+            $file_path = $gateways_dir . $file;
+            if (file_exists($file_path)) {
+                require_once $file_path;
+            }
+        }
 
-                foreach ($gateway_files as $gateway_file) {
-                    if (file_exists($gateway_file)) {
-                        require_once $gateway_file;
-                        break;
-                    }
+        // Load other gateways (when implemented)
+        $other_gateways = array('paypal', 'flutterwave', 'razorpay');
+
+        foreach ($other_gateways as $gateway) {
+            $gateway_dir = $gateways_dir . $gateway . '/';
+
+            if (is_dir($gateway_dir)) {
+                $gateway_files = glob($gateway_dir . '*.php');
+                foreach ($gateway_files as $file) {
+                    require_once $file;
                 }
             }
         }
+    }
+
+    /**
+     * Register payment gateway
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @param object $gateway_instance Gateway instance
+     */
+    public function register_payment_gateway($gateway_id, $gateway_instance)
+    {
+        $this->registered_gateways[$gateway_id] = $gateway_instance;
+        chatshop_log("Payment gateway registered: {$gateway_id}", 'info');
+    }
+
+    /**
+     * Get registered payment gateways
+     *
+     * @since 1.0.0
+     * @return array Registered gateways
+     */
+    public function get_registered_gateways()
+    {
+        return $this->registered_gateways;
     }
 
     /**
@@ -509,10 +467,6 @@ final class ChatShop
      */
     private function define_admin_hooks()
     {
-        if (!is_admin()) {
-            return;
-        }
-
         $admin_path = CHATSHOP_PLUGIN_DIR . 'admin/class-chatshop-admin.php';
         if (file_exists($admin_path)) {
             $plugin_admin = new ChatShop_Admin($this->get_plugin_name(), $this->get_version());
@@ -705,7 +659,7 @@ register_activation_hook(__FILE__, array('ChatShop\ChatShop_Activator', 'activat
 register_deactivation_hook(__FILE__, array('ChatShop\ChatShop_Deactivator', 'deactivate'));
 
 /**
- * Global helper functions
+ * Global helper functions - SINGLE LOCATION FOR GLOBAL FUNCTIONS
  */
 
 /**
@@ -721,6 +675,7 @@ function chatshop()
 
 /**
  * Log message using ChatShop logger
+ * This is the ONLY declaration of this function in the entire plugin
  *
  * @since 1.0.0
  * @param string $message Log message
@@ -729,7 +684,12 @@ function chatshop()
  */
 function chatshop_log($message, $level = 'info', $context = array())
 {
-    ChatShop_Logger::log($message, $level, $context);
+    if (class_exists('ChatShop\ChatShop_Logger')) {
+        ChatShop_Logger::log($message, $level, $context);
+    } else {
+        // Fallback to error_log if logger class is not available
+        error_log("[ChatShop] {$message}");
+    }
 }
 
 /**
@@ -767,4 +727,129 @@ function chatshop_get_component($component_id)
 {
     $component_loader = chatshop()->get_component_loader();
     return $component_loader ? $component_loader->get_component_instance($component_id) : null;
+}
+
+/**
+ * Get payment manager instance
+ *
+ * @since 1.0.0
+ * @return ChatShop_Payment_Manager|null Payment manager instance
+ */
+function chatshop_get_payment_manager()
+{
+    return chatshop()->get_payment_manager();
+}
+
+/**
+ * Get contact manager instance
+ *
+ * @since 1.0.0
+ * @return ChatShop_Contact_Manager|null Contact manager instance
+ */
+function chatshop_get_contact_manager()
+{
+    return chatshop()->get_contact_manager();
+}
+
+/**
+ * Get analytics instance
+ *
+ * @since 1.0.0
+ * @return ChatShop_Analytics|null Analytics instance
+ */
+function chatshop_get_analytics()
+{
+    return chatshop()->get_analytics();
+}
+
+/**
+ * Track analytics event - Global convenience function
+ *
+ * @since 1.0.0
+ * @param string $metric_type Type of metric
+ * @param string $metric_name Metric name
+ * @param mixed  $metric_value Metric value
+ * @param array  $meta Additional metadata
+ * @return bool Success status
+ */
+function chatshop_track_analytics($metric_type, $metric_name, $metric_value = 1, $meta = array())
+{
+    if (class_exists('ChatShop\ChatShop_Helper')) {
+        return ChatShop_Helper::track_analytics_event($metric_type, $metric_name, $metric_value, $meta);
+    }
+    return false;
+}
+
+/**
+ * Check if analytics feature is enabled
+ *
+ * @since 1.0.0
+ * @return bool Analytics status
+ */
+function chatshop_is_analytics_enabled()
+{
+    return chatshop_is_premium_feature_available('analytics') ||
+        chatshop_is_premium_feature_available('advanced_analytics');
+}
+
+/**
+ * Format currency amount - Global convenience function
+ *
+ * @since 1.0.0
+ * @param float  $amount Amount to format
+ * @param string $currency Currency code
+ * @return string Formatted currency
+ */
+function chatshop_format_currency($amount, $currency = '')
+{
+    if (empty($currency)) {
+        $currency = \ChatShop\chatshop_get_default_currency();
+    }
+
+    $symbols = array(
+        'NGN' => '₦',
+        'USD' => '$', // Fixed: Changed from ',' to '$'
+        'EUR' => '€',
+        'GBP' => '£',
+        'ZAR' => 'R',
+        'GHS' => '₵',
+        'KES' => 'KSh'
+    );
+
+    $symbol = isset($symbols[$currency]) ? $symbols[$currency] : $currency;
+    return $symbol . number_format((float) $amount, 2);
+}
+/**
+ * Get default currency
+ *
+ * @since 1.0.0
+ * @return string Default currency code
+ */
+function chatshop_get_default_currency()
+{
+    return \ChatShop\chatshop_get_default_currency();
+}
+
+/**
+ * Check if plugin is enabled
+ *
+ * @since 1.0.0
+ * @return bool Plugin status
+ */
+function chatshop_is_enabled()
+{
+    return \ChatShop\chatshop_is_enabled();
+}
+
+/**
+ * Create admin notice
+ *
+ * @since 1.0.0
+ * @param string $message Notice message
+ * @param string $type Notice type
+ * @param bool   $dismissible Whether dismissible
+ */
+function chatshop_add_admin_notice($message, $type = 'info', $dismissible = true)
+{
+    \ChatShop\chatshop_admin_notice($message, $type, $dismissible);
 }
