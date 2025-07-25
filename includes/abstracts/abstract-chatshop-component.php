@@ -1,14 +1,16 @@
 <?php
 
 /**
- * Abstract Component
+ * Abstract Component Class
  *
+ * File: includes/abstracts/abstract-chatshop-component.php
+ * 
  * Base class for all ChatShop components providing common functionality
- * for initialization, configuration, and lifecycle management.
+ * and standardized interface for component management.
  *
- * @package    ChatShop
- * @subpackage ChatShop/includes/abstracts
- * @since      1.0.0
+ * @package ChatShop
+ * @subpackage Abstracts
+ * @since 1.0.0
  */
 
 namespace ChatShop;
@@ -19,209 +21,124 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Abstract Component Class
+ * Abstract ChatShop Component Class
+ *
+ * Provides base functionality for all plugin components including
+ * activation, deactivation, initialization, and common utilities.
  *
  * @since 1.0.0
  */
 abstract class ChatShop_Abstract_Component
 {
     /**
-     * Component ID
+     * Component unique identifier
      *
-     * @since 1.0.0
      * @var string
+     * @since 1.0.0
      */
     protected $id;
 
     /**
      * Component name
      *
-     * @since 1.0.0
      * @var string
+     * @since 1.0.0
      */
     protected $name;
 
     /**
      * Component description
      *
-     * @since 1.0.0
      * @var string
+     * @since 1.0.0
      */
     protected $description;
 
     /**
      * Component version
      *
-     * @since 1.0.0
      * @var string
+     * @since 1.0.0
      */
     protected $version = '1.0.0';
 
     /**
      * Component enabled status
      *
-     * @since 1.0.0
      * @var bool
+     * @since 1.0.0
      */
-    protected $enabled = false;
+    protected $enabled = true;
 
     /**
      * Component dependencies
      *
-     * @since 1.0.0
      * @var array
+     * @since 1.0.0
      */
     protected $dependencies = array();
 
     /**
      * Component settings
      *
-     * @since 1.0.0
      * @var array
+     * @since 1.0.0
      */
     protected $settings = array();
 
     /**
-     * Component initialized status
+     * Component initialization flag
      *
-     * @since 1.0.0
      * @var bool
-     */
-    protected $initialized = false;
-
-    /**
-     * Premium component flag
-     *
-     * @since 1.0.0
-     * @var bool
-     */
-    protected $premium = false;
-
-    /**
-     * Constructor
-     *
      * @since 1.0.0
      */
-    public function __construct()
-    {
-        $this->load_settings();
-        $this->init();
-    }
+    private $initialized = false;
 
     /**
      * Initialize component
      *
-     * Override this method in child classes
+     * This method should be implemented by child classes to set up
+     * component-specific functionality, hooks, and properties.
      *
      * @since 1.0.0
      */
     abstract protected function init();
 
     /**
-     * Activate component
+     * Component activation handler
+     *
+     * Override this method to perform component-specific activation tasks
+     * such as creating database tables, setting default options, etc.
      *
      * @since 1.0.0
-     * @return bool Activation result
+     * @return bool True on successful activation, false on failure
      */
-    public function activate()
+    protected function do_activation()
     {
-        if (!$this->check_dependencies()) {
-            return false;
-        }
-
-        if ($this->premium && !$this->check_premium_license()) {
-            return false;
-        }
-
-        $result = $this->do_activation();
-
-        if ($result) {
-            $this->enabled = true;
-            $this->save_settings();
-
-            do_action('chatshop_component_activated', $this->id);
-            chatshop_log("Component activated: {$this->id}", 'info');
-        }
-
-        return $result;
+        // Default implementation - override in child classes
+        return true;
     }
 
     /**
-     * Deactivate component
+     * Component deactivation handler
+     *
+     * Override this method to perform component-specific deactivation tasks
+     * such as cleanup, removing scheduled events, etc.
      *
      * @since 1.0.0
-     * @return bool Deactivation result
+     * @return bool True on successful deactivation, false on failure
      */
-    public function deactivate()
+    protected function do_deactivation()
     {
-        $result = $this->do_deactivation();
-
-        if ($result) {
-            $this->enabled = false;
-            $this->save_settings();
-
-            do_action('chatshop_component_deactivated', $this->id);
-            chatshop_log("Component deactivated: {$this->id}", 'info');
-        }
-
-        return $result;
-    }
-
-    /**
-     * Enable component
-     *
-     * @since 1.0.0
-     * @return bool Enable result
-     */
-    public function enable()
-    {
-        if (!$this->is_active()) {
-            return $this->activate();
-        }
-
-        $this->enabled = true;
-        return $this->save_settings();
-    }
-
-    /**
-     * Disable component
-     *
-     * @since 1.0.0
-     * @return bool Disable result
-     */
-    public function disable()
-    {
-        $this->enabled = false;
-        return $this->save_settings();
-    }
-
-    /**
-     * Check if component is enabled
-     *
-     * @since 1.0.0
-     * @return bool Enabled status
-     */
-    public function is_enabled()
-    {
-        return $this->enabled;
-    }
-
-    /**
-     * Check if component is active (enabled and dependencies met)
-     *
-     * @since 1.0.0
-     * @return bool Active status
-     */
-    public function is_active()
-    {
-        return $this->enabled && $this->check_dependencies();
+        // Default implementation - override in child classes
+        return true;
     }
 
     /**
      * Get component ID
      *
      * @since 1.0.0
-     * @return string Component ID
+     * @return string Component identifier
      */
     public function get_id()
     {
@@ -262,10 +179,64 @@ abstract class ChatShop_Abstract_Component
     }
 
     /**
+     * Check if component is enabled
+     *
+     * @since 1.0.0
+     * @return bool True if enabled, false otherwise
+     */
+    public function is_enabled()
+    {
+        return $this->enabled;
+    }
+
+    /**
+     * Enable component
+     *
+     * @since 1.0.0
+     * @return bool True on success, false on failure
+     */
+    public function enable()
+    {
+        if ($this->enabled) {
+            return true;
+        }
+
+        $this->enabled = true;
+
+        // Trigger activation if not already initialized
+        if (!$this->initialized) {
+            $this->activate();
+        }
+
+        return true;
+    }
+
+    /**
+     * Disable component
+     *
+     * @since 1.0.0
+     * @return bool True on success, false on failure
+     */
+    public function disable()
+    {
+        if (!$this->enabled) {
+            return true;
+        }
+
+        $result = $this->deactivate();
+
+        if ($result) {
+            $this->enabled = false;
+        }
+
+        return $result;
+    }
+
+    /**
      * Get component dependencies
      *
      * @since 1.0.0
-     * @return array Component dependencies
+     * @return array Array of component IDs this component depends on
      */
     public function get_dependencies()
     {
@@ -273,57 +244,20 @@ abstract class ChatShop_Abstract_Component
     }
 
     /**
-     * Check if component is premium
+     * Check if component dependencies are met
      *
      * @since 1.0.0
-     * @return bool Premium status
+     * @return bool True if all dependencies are available, false otherwise
      */
-    public function is_premium()
-    {
-        return $this->premium;
-    }
-
-    /**
-     * Component activation hook
-     *
-     * Override this method in child classes
-     *
-     * @since 1.0.0
-     * @return bool Activation result
-     */
-    protected function do_activation()
-    {
-        return true;
-    }
-
-    /**
-     * Component deactivation hook
-     *
-     * Override this method in child classes
-     *
-     * @since 1.0.0
-     * @return bool Deactivation result
-     */
-    protected function do_deactivation()
-    {
-        return true;
-    }
-
-    /**
-     * Check component dependencies
-     *
-     * @since 1.0.0
-     * @return bool Dependencies status
-     */
-    protected function check_dependencies()
+    public function dependencies_met()
     {
         if (empty($this->dependencies)) {
             return true;
         }
 
         foreach ($this->dependencies as $dependency) {
-            if (!$this->is_dependency_met($dependency)) {
-                chatshop_log("Component dependency not met: {$dependency} for {$this->id}", 'warning');
+            $component = chatshop_get_component($dependency);
+            if (!$component || !$component->is_enabled()) {
                 return false;
             }
         }
@@ -332,68 +266,145 @@ abstract class ChatShop_Abstract_Component
     }
 
     /**
-     * Check if specific dependency is met
+     * Activate component
      *
      * @since 1.0.0
-     * @param string $dependency Dependency identifier
-     * @return bool Dependency status
+     * @return bool True on successful activation, false on failure
      */
-    protected function is_dependency_met($dependency)
+    public function activate()
     {
-        // Check for WordPress plugins
-        if (strpos($dependency, 'plugin:') === 0) {
-            $plugin_file = substr($dependency, 7);
-            return is_plugin_active($plugin_file);
+        if ($this->initialized) {
+            return true;
         }
 
-        // Check for WordPress feature
-        if (strpos($dependency, 'wp:') === 0) {
-            $feature = substr($dependency, 3);
-            return $this->check_wp_feature($feature);
+        // Check dependencies
+        if (!$this->dependencies_met()) {
+            $this->log_error("Component activation failed: Dependencies not met for {$this->id}");
+            return false;
         }
 
-        // Check for ChatShop component
-        if (strpos($dependency, 'component:') === 0) {
-            $component_id = substr($dependency, 10);
-            $component = chatshop_get_component($component_id);
-            return $component && $component->is_enabled();
+        // Run activation tasks
+        $result = $this->do_activation();
+
+        if ($result) {
+            $this->initialized = true;
+            $this->log_info("Component activated successfully: {$this->id}");
+
+            // Fire activation hook
+            do_action('chatshop_component_activated', $this->id, $this);
+        } else {
+            $this->log_error("Component activation failed: {$this->id}");
         }
 
-        return false;
+        return $result;
     }
 
     /**
-     * Check WordPress feature
+     * Deactivate component
      *
      * @since 1.0.0
-     * @param string $feature Feature name
-     * @return bool Feature availability
+     * @return bool True on successful deactivation, false on failure
      */
-    protected function check_wp_feature($feature)
+    public function deactivate()
     {
-        switch ($feature) {
-            case 'rest_api':
-                return function_exists('rest_url');
-            case 'ajax':
-                return defined('DOING_AJAX');
-            case 'cron':
-                return !defined('DISABLE_WP_CRON') || !DISABLE_WP_CRON;
-            case 'multisite':
-                return is_multisite();
-            default:
-                return false;
+        if (!$this->initialized) {
+            return true;
         }
+
+        // Run deactivation tasks
+        $result = $this->do_deactivation();
+
+        if ($result) {
+            $this->initialized = false;
+            $this->log_info("Component deactivated successfully: {$this->id}");
+
+            // Fire deactivation hook
+            do_action('chatshop_component_deactivated', $this->id, $this);
+        } else {
+            $this->log_error("Component deactivation failed: {$this->id}");
+        }
+
+        return $result;
     }
 
     /**
-     * Check premium license
+     * Get component setting
      *
      * @since 1.0.0
-     * @return bool License status
+     * @param string $key Setting key
+     * @param mixed $default Default value if setting not found
+     * @return mixed Setting value
      */
-    protected function check_premium_license()
+    public function get_setting($key, $default = null)
     {
-        return chatshop_is_premium_feature_available($this->id);
+        if (!empty($this->settings) && isset($this->settings[$key])) {
+            return $this->settings[$key];
+        }
+
+        // Try to get from WordPress options
+        $option_name = "chatshop_{$this->id}_settings";
+        $settings = get_option($option_name, array());
+
+        return isset($settings[$key]) ? $settings[$key] : $default;
+    }
+
+    /**
+     * Update component setting
+     *
+     * @since 1.0.0
+     * @param string $key Setting key
+     * @param mixed $value Setting value
+     * @return bool True on success, false on failure
+     */
+    public function update_setting($key, $value)
+    {
+        $option_name = "chatshop_{$this->id}_settings";
+        $settings = get_option($option_name, array());
+
+        $settings[$key] = $value;
+
+        // Update local cache
+        $this->settings[$key] = $value;
+
+        return update_option($option_name, $settings);
+    }
+
+    /**
+     * Delete component setting
+     *
+     * @since 1.0.0
+     * @param string $key Setting key
+     * @return bool True on success, false on failure
+     */
+    public function delete_setting($key)
+    {
+        $option_name = "chatshop_{$this->id}_settings";
+        $settings = get_option($option_name, array());
+
+        if (isset($settings[$key])) {
+            unset($settings[$key]);
+
+            // Update local cache
+            if (isset($this->settings[$key])) {
+                unset($this->settings[$key]);
+            }
+
+            return update_option($option_name, $settings);
+        }
+
+        return true;
+    }
+
+    /**
+     * Get all component settings
+     *
+     * @since 1.0.0
+     * @return array Component settings
+     */
+    public function get_all_settings()
+    {
+        $option_name = "chatshop_{$this->id}_settings";
+        return get_option($option_name, array());
     }
 
     /**
@@ -403,120 +414,83 @@ abstract class ChatShop_Abstract_Component
      */
     protected function load_settings()
     {
-        $this->settings = chatshop_get_option($this->id, '', array());
-        $this->enabled = isset($this->settings['enabled']) ? (bool) $this->settings['enabled'] : false;
+        $option_name = "chatshop_{$this->id}_settings";
+        $this->settings = get_option($option_name, array());
     }
 
     /**
      * Save component settings
      *
      * @since 1.0.0
-     * @return bool Save result
+     * @return bool True on success, false on failure
      */
     protected function save_settings()
     {
-        $this->settings['enabled'] = $this->enabled;
-        return chatshop_update_option($this->id, '', $this->settings);
+        $option_name = "chatshop_{$this->id}_settings";
+        return update_option($option_name, $this->settings);
     }
 
     /**
-     * Get setting value
+     * Log informational message
      *
      * @since 1.0.0
-     * @param string $key Setting key
-     * @param mixed  $default Default value
-     * @return mixed Setting value
+     * @param string $message Log message
      */
-    protected function get_setting($key, $default = null)
+    protected function log_info($message)
     {
-        return isset($this->settings[$key]) ? $this->settings[$key] : $default;
-    }
-
-    /**
-     * Update setting value
-     *
-     * @since 1.0.0
-     * @param string $key Setting key
-     * @param mixed  $value Setting value
-     * @return bool Update result
-     */
-    protected function update_setting($key, $value)
-    {
-        $this->settings[$key] = $value;
-        return $this->save_settings();
-    }
-
-    /**
-     * Delete setting
-     *
-     * @since 1.0.0
-     * @param string $key Setting key
-     * @return bool Delete result
-     */
-    protected function delete_setting($key)
-    {
-        if (isset($this->settings[$key])) {
-            unset($this->settings[$key]);
-            return $this->save_settings();
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'info');
+        } else {
+            error_log("ChatShop {$this->id}: {$message}");
         }
-
-        return false;
     }
 
     /**
-     * Get all settings
+     * Log error message
      *
      * @since 1.0.0
-     * @return array All settings
+     * @param string $message Error message
      */
-    public function get_settings()
+    protected function log_error($message)
     {
-        return $this->settings;
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'error');
+        } else {
+            error_log("ChatShop {$this->id} ERROR: {$message}");
+        }
     }
 
     /**
-     * Update all settings
+     * Log warning message
      *
      * @since 1.0.0
-     * @param array $settings New settings
-     * @return bool Update result
+     * @param string $message Warning message
      */
-    public function update_settings($settings)
+    protected function log_warning($message)
     {
-        $this->settings = array_merge($this->settings, $settings);
-        return $this->save_settings();
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'warning');
+        } else {
+            error_log("ChatShop {$this->id} WARNING: {$message}");
+        }
     }
 
     /**
-     * Reset settings to defaults
+     * Check if component is initialized
      *
      * @since 1.0.0
-     * @return bool Reset result
+     * @return bool True if initialized, false otherwise
      */
-    public function reset_settings()
+    public function is_initialized()
     {
-        $this->settings = array('enabled' => false);
-        return $this->save_settings();
+        return $this->initialized;
     }
 
     /**
-     * Component cleanup
-     *
-     * Override this method in child classes for cleanup operations
+     * Get component status information
      *
      * @since 1.0.0
-     */
-    public function cleanup()
-    {
-        // Default implementation does nothing
-        // Child classes should override this for specific cleanup
-    }
-
-    /**
-     * Get component status info
-     *
-     * @since 1.0.0
-     * @return array Status information
+     * @return array Component status array
      */
     public function get_status()
     {
@@ -525,24 +499,44 @@ abstract class ChatShop_Abstract_Component
             'name' => $this->name,
             'version' => $this->version,
             'enabled' => $this->enabled,
-            'active' => $this->is_active(),
-            'premium' => $this->premium,
+            'initialized' => $this->initialized,
             'dependencies' => $this->dependencies,
-            'dependencies_met' => $this->check_dependencies()
+            'dependencies_met' => $this->dependencies_met()
         );
     }
 
     /**
-     * Log component message
+     * Cleanup component data
+     *
+     * This method should be called during uninstall to remove
+     * component-specific data, settings, and database tables.
      *
      * @since 1.0.0
-     * @param string $message Log message
-     * @param string $level Log level
-     * @param array  $context Additional context
+     * @return bool True on successful cleanup, false on failure
      */
-    protected function log($message, $level = 'info', $context = array())
+    public function cleanup()
     {
-        $context['component'] = $this->id;
-        chatshop_log($message, $level, $context);
+        // Remove component settings
+        $option_name = "chatshop_{$this->id}_settings";
+        delete_option($option_name);
+
+        $this->log_info("Component cleanup completed: {$this->id}");
+
+        // Fire cleanup hook
+        do_action('chatshop_component_cleanup', $this->id, $this);
+
+        return true;
+    }
+
+    /**
+     * Force component reinitialization
+     *
+     * @since 1.0.0
+     * @return bool True on successful reinitialization, false on failure
+     */
+    public function reinitialize()
+    {
+        $this->initialized = false;
+        return $this->activate();
     }
 }
