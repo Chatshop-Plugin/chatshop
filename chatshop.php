@@ -104,7 +104,7 @@ if (file_exists($analytics_export_path)) {
 }
 
 /**
- * Main ChatShop class
+ * Main ChatShop class - UPDATED VERSION
  *
  * @since 1.0.0
  */
@@ -196,8 +196,7 @@ final class ChatShop
      * Ensures only one instance of ChatShop is loaded or can be loaded.
      *
      * @since 1.0.0
-     * @static
-     * @return ChatShop - Main instance
+     * @return ChatShop Main instance
      */
     public static function instance()
     {
@@ -212,135 +211,46 @@ final class ChatShop
      *
      * @since 1.0.0
      */
-    public function __construct()
+    private function __construct()
     {
+        $this->init();
+    }
+
+    /**
+     * Initialize the plugin
+     *
+     * @since 1.0.0
+     */
+    private function init()
+    {
+        // Check requirements first
         $this->check_requirements();
-        $this->init_premium_features();
-        $this->load_dependencies();
-        $this->init_loader();
+
+        // Initialize core components
         $this->init_logger();
-        $this->set_locale();
+        $this->init_loader();
         $this->init_component_loader();
-        $this->init_core_components();
+        $this->set_locale();
+        $this->init_premium_features();
+
+        // Load components
+        $this->load_components();
+
+        // Define admin hooks
         $this->define_admin_hooks();
+
+        // Define public hooks
         $this->define_public_hooks();
-        $this->run();
+
+        // Run the loader
+        $this->loader->run();
+
+        // Plugin is now fully loaded
+        do_action('chatshop_loaded', $this);
     }
 
     /**
-     * Initialize component loader
-     *
-     * @since 1.0.0
-     */
-    private function init_component_loader()
-    {
-        $this->component_loader = new ChatShop_Component_Loader();
-        $this->component_loader->load_components();
-    }
-
-    /**
-     * Initialize core components
-     *
-     * @since 1.0.0
-     */
-    private function init_core_components()
-    {
-        // Initialize payment manager
-        if (class_exists('ChatShop\ChatShop_Payment_Manager')) {
-            $this->payment_manager = new ChatShop_Payment_Manager();
-        }
-
-        // Initialize contact manager if available
-        if (class_exists('ChatShop\ChatShop_Contact_Manager')) {
-            $this->contact_manager = new ChatShop_Contact_Manager();
-        }
-
-        // Initialize analytics if available
-        if (class_exists('ChatShop\ChatShop_Analytics')) {
-            $this->analytics = new ChatShop_Analytics();
-        }
-
-        // Load payment gateways
-        $this->load_payment_gateways();
-    }
-
-    /**
-     * Load payment gateways
-     *
-     * @since 1.0.0
-     */
-    private function load_payment_gateways()
-    {
-        $gateways_dir = CHATSHOP_PLUGIN_DIR . 'components/payment/gateways/';
-
-        // Load Paystack gateway
-        $paystack_files = array(
-            'paystack/class-chatshop-paystack-api.php',
-            'paystack/class-chatshop-paystack-gateway.php',
-            'paystack/class-chatshop-paystack-webhook.php'
-        );
-
-        foreach ($paystack_files as $file) {
-            $file_path = $gateways_dir . $file;
-            if (file_exists($file_path)) {
-                require_once $file_path;
-            }
-        }
-
-        // Load other gateways (when implemented)
-        $other_gateways = array('paypal', 'flutterwave', 'razorpay');
-
-        foreach ($other_gateways as $gateway) {
-            $gateway_dir = $gateways_dir . $gateway . '/';
-
-            if (is_dir($gateway_dir)) {
-                $gateway_files = glob($gateway_dir . '*.php');
-                foreach ($gateway_files as $file) {
-                    require_once $file;
-                }
-            }
-        }
-    }
-
-    /**
-     * Register payment gateway
-     *
-     * @since 1.0.0
-     * @param string $gateway_id Gateway identifier
-     * @param object $gateway_instance Gateway instance
-     */
-    public function register_payment_gateway($gateway_id, $gateway_instance)
-    {
-        $this->registered_gateways[$gateway_id] = $gateway_instance;
-        chatshop_log("Payment gateway registered: {$gateway_id}", 'info');
-    }
-
-    /**
-     * Get registered payment gateways
-     *
-     * @since 1.0.0
-     * @return array Registered gateways
-     */
-    public function get_registered_gateways()
-    {
-        return $this->registered_gateways;
-    }
-
-    /**
-     * Initialize plugin with version check
-     *
-     * @since 1.0.0
-     */
-    public function init()
-    {
-        ChatShop_i18n::load_plugin_textdomain(get_plugin_data(CHATSHOP_PLUGIN_FILE, false, false)['TextDomain'] ?? 'chatshop', false, dirname(CHATSHOP_PLUGIN_BASENAME) . '/languages/');
-
-        do_action('chatshop_loaded');
-        chatshop_log('ChatShop plugin initialized successfully', 'info', array('version' => CHATSHOP_VERSION));
-    }
-
-    /**
-     * Load the required dependencies for this plugin
+     * Load required dependencies
      *
      * @since 1.0.0
      */
@@ -369,6 +279,16 @@ final class ChatShop
     private function init_loader()
     {
         $this->loader = new ChatShop_Loader();
+    }
+
+    /**
+     * Initialize component loader
+     *
+     * @since 1.0.0
+     */
+    private function init_component_loader()
+    {
+        $this->component_loader = new ChatShop_Component_Loader();
     }
 
     /**
@@ -432,7 +352,7 @@ final class ChatShop
             'contact_import_export' => isset($premium_options['contact_import_export']) ? (bool) $premium_options['contact_import_export'] : false,
             'bulk_messaging' => isset($premium_options['bulk_messaging']) ? (bool) $premium_options['bulk_messaging'] : false,
             'advanced_analytics' => isset($premium_options['advanced_analytics']) ? (bool) $premium_options['advanced_analytics'] : false,
-            'analytics' => isset($premium_options['analytics']) ? (bool) $premium_options['analytics'] : false,
+            'analytics' => isset($premium_options['analytics']) ? (bool) $premium_options['analytics'] : true, // Default enabled for development
             'whatsapp_business_api' => isset($premium_options['whatsapp_business_api']) ? (bool) $premium_options['whatsapp_business_api'] : false,
             'campaign_automation' => isset($premium_options['campaign_automation']) ? (bool) $premium_options['campaign_automation'] : false,
             'custom_reports' => isset($premium_options['custom_reports']) ? (bool) $premium_options['custom_reports'] : false
@@ -440,88 +360,66 @@ final class ChatShop
     }
 
     /**
-     * Register all of the hooks related to the admin area functionality
+     * Load components
+     *
+     * @since 1.0.0
+     */
+    private function load_components()
+    {
+        // Load all enabled components
+        $this->component_loader->load_components();
+
+        // Get component instances for easy access
+        $this->payment_manager = $this->component_loader->get_component_instance('payment');
+        $this->contact_manager = $this->component_loader->get_component_instance('contact_manager');
+        $this->analytics = $this->component_loader->get_component_instance('analytics');
+
+        // Log component loading status
+        chatshop_log('Components loaded successfully', 'info');
+    }
+
+    /**
+     * Define admin hooks
      *
      * @since 1.0.0
      */
     private function define_admin_hooks()
     {
-        if (!is_admin()) {
-            return;
-        }
+        // Load dependencies first
+        $this->load_dependencies();
 
-        $admin_path = CHATSHOP_PLUGIN_DIR . 'admin/class-chatshop-admin.php';
-        if (file_exists($admin_path)) {
-            require_once $admin_path;
+        if (is_admin()) {
+            $this->admin = new ChatShop_Admin();
 
-            // ChatShop_Admin constructor doesn't take parameters
-            $plugin_admin = new ChatShop_Admin();
-
-            $this->loader->add_action('admin_enqueue_scripts', $plugin_admin, 'enqueue_styles');
-            $this->loader->add_action('admin_enqueue_scripts', $plugin_admin, 'enqueue_scripts');
+            $this->loader->add_action('admin_enqueue_scripts', $this->admin, 'enqueue_styles');
+            $this->loader->add_action('admin_enqueue_scripts', $this->admin, 'enqueue_scripts');
         }
     }
 
     /**
-     * Register all of the hooks related to the public-facing functionality
+     * Define public hooks
      *
      * @since 1.0.0
      */
     private function define_public_hooks()
     {
-        $public_path = CHATSHOP_PLUGIN_DIR . 'public/class-chatshop-public.php';
-        if (file_exists($public_path)) {
-            require_once $public_path;
+        if (class_exists('ChatShop_Public')) {
+            $this->public = new ChatShop_Public();
 
-            // ChatShop_Public constructor doesn't take parameters
-            $plugin_public = new ChatShop_Public();
-
-            $this->loader->add_action('wp_enqueue_scripts', $plugin_public, 'enqueue_styles');
-            $this->loader->add_action('wp_enqueue_scripts', $plugin_public, 'enqueue_scripts');
+            $this->loader->add_action('wp_enqueue_scripts', $this->public, 'enqueue_styles');
+            $this->loader->add_action('wp_enqueue_scripts', $this->public, 'enqueue_scripts');
         }
     }
 
     /**
-     * Run the loader to execute all of the hooks
+     * Get component loader instance
      *
      * @since 1.0.0
+     * @return ChatShop_Component_Loader Component loader instance
      */
-    public function run()
+    public function get_component_loader()
     {
-        $this->loader->run();
-    }
-
-    /**
-     * The name of the plugin used to uniquely identify it
-     *
-     * @since 1.0.0
-     * @return string The name of the plugin
-     */
-    public function get_plugin_name()
-    {
-        return 'chatshop';
-    }
-
-    /**
-     * The reference to the class that orchestrates the hooks with the plugin
-     *
-     * @since 1.0.0
-     * @return ChatShop_Loader Orchestrates the hooks of the plugin
-     */
-    public function get_loader()
-    {
-        return $this->loader;
-    }
-
-    /**
-     * Retrieve the version number of the plugin
-     *
-     * @since 1.0.0
-     * @return string The version number of the plugin
-     */
-    public function get_version()
-    {
-        return CHATSHOP_VERSION;
+        return $this->component_loader;
     }
 
     /**
@@ -547,7 +445,7 @@ final class ChatShop
     }
 
     /**
-     * Get analytics instance - ANALYTICS GETTER
+     * Get analytics instance
      *
      * @since 1.0.0
      * @return ChatShop_Analytics|null Analytics instance
@@ -558,26 +456,26 @@ final class ChatShop
     }
 
     /**
-     * Get component loader instance
-     *
-     * @since 1.0.0
-     * @return ChatShop_Component_Loader Component loader instance
-     */
-    public function get_component_loader()
-    {
-        return $this->component_loader;
-    }
-
-    /**
-     * Check if premium feature is available
+     * Check if premium feature is enabled
      *
      * @since 1.0.0
      * @param string $feature Feature name
-     * @return bool Whether feature is available
+     * @return bool Feature status
      */
-    public function is_premium_feature_available($feature)
+    public function is_premium_feature_enabled($feature)
     {
-        return isset($this->premium_features[$feature]) && $this->premium_features[$feature];
+        return isset($this->premium_features[$feature]) ? $this->premium_features[$feature] : false;
+    }
+
+    /**
+     * Get all premium features status
+     *
+     * @since 1.0.0
+     * @return array Premium features array
+     */
+    public function get_premium_features()
+    {
+        return $this->premium_features;
     }
 
     /**
@@ -620,6 +518,61 @@ final class ChatShop
         echo '<div class="notice notice-warning"><p>';
         _e('ChatShop works best with WooCommerce. Please install and activate WooCommerce for the full experience.', 'chatshop');
         echo '</p></div>';
+    }
+
+    /**
+     * Get plugin version
+     *
+     * @since 1.0.0
+     * @return string Plugin version
+     */
+    public function get_version()
+    {
+        return defined('CHATSHOP_VERSION') ? CHATSHOP_VERSION : '1.0.0';
+    }
+
+    /**
+     * Get plugin status
+     *
+     * @since 1.0.0
+     * @return array Plugin status array
+     */
+    public function get_status()
+    {
+        return array(
+            'version' => $this->get_version(),
+            'premium_features' => $this->premium_features,
+            'components_loaded' => array(
+                'payment' => !is_null($this->payment_manager),
+                'contact_manager' => !is_null($this->contact_manager),
+                'analytics' => !is_null($this->analytics)
+            ),
+            'requirements_met' => array(
+                'wordpress' => version_compare(get_bloginfo('version'), '6.3', '>='),
+                'php' => version_compare(PHP_VERSION, '7.4', '>='),
+                'woocommerce' => class_exists('WooCommerce')
+            )
+        );
+    }
+
+    /**
+     * Prevent cloning
+     *
+     * @since 1.0.0
+     */
+    public function __clone()
+    {
+        _doing_it_wrong(__FUNCTION__, __('Cloning is forbidden.', 'chatshop'), '1.0.0');
+    }
+
+    /**
+     * Prevent unserializing
+     *
+     * @since 1.0.0
+     */
+    public function __wakeup()
+    {
+        _doing_it_wrong(__FUNCTION__, __('Unserializing instances of this class is forbidden.', 'chatshop'), '1.0.0');
     }
 }
 

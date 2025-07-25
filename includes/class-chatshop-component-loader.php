@@ -83,17 +83,17 @@ class ChatShop_Component_Loader
             'enabled' => false // Disabled until implemented
         ));
 
-        // Register analytics component (when created)
+        // Register analytics component - FIXED CONFIGURATION
         $this->registry->register_component(array(
             'id' => 'analytics',
             'name' => __('Analytics & Reporting', 'chatshop'),
             'description' => __('Track conversions and generate reports', 'chatshop'),
             'path' => CHATSHOP_PLUGIN_DIR . 'components/analytics/',
-            'main_file' => 'class-chatshop-analytics-manager.php',
-            'class_name' => 'ChatShop_Analytics_Manager',
+            'main_file' => 'class-chatshop-analytics.php', // FIXED: Correct filename
+            'class_name' => 'ChatShop_Analytics', // FIXED: Correct class name
             'dependencies' => array('payment'),
             'version' => '1.0.0',
-            'enabled' => false // Disabled until implemented
+            'enabled' => true // FIXED: Enable analytics component
         ));
 
         // Allow other plugins/themes to register components
@@ -210,7 +210,8 @@ class ChatShop_Component_Loader
      */
     public function get_component_instance($component_id)
     {
-        return isset($this->component_instances[$component_id]) ? $this->component_instances[$component_id] : null;
+        return isset($this->component_instances[$component_id]) ?
+            $this->component_instances[$component_id] : null;
     }
 
     /**

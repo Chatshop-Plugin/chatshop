@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Analytics Admin Interface
+ * Analytics Admin Interface - FIXED VERSION
  *
  * File: admin/partials/analytics.php
  * 
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Check premium access
+// Check premium access first
 if (!chatshop_is_premium()) {
 ?>
     <div class="wrap">
@@ -50,210 +50,201 @@ if (!chatshop_is_premium()) {
     return;
 }
 
-// Get analytics component instance
+// Get analytics component instance - FIXED APPROACH
 $analytics = chatshop_get_component('analytics');
+
+// Debug information for troubleshooting
+$debug_info = array(
+    'chatshop_loaded' => chatshop_is_loaded(),
+    'premium_enabled' => chatshop_is_premium(),
+    'analytics_component' => $analytics ? 'Available' : 'Not Available',
+    'component_class' => $analytics ? get_class($analytics) : 'N/A',
+    'component_status' => $analytics && method_exists($analytics, 'get_status') ? $analytics->get_status() : 'N/A'
+);
+
 if (!$analytics) {
 ?>
     <div class="wrap">
         <h1><?php _e('Analytics Dashboard', 'chatshop'); ?></h1>
+
         <div class="notice notice-error">
-            <p><?php _e('Analytics component is not available. Please contact support.', 'chatshop'); ?></p>
+            <p><strong><?php _e('Analytics Component Issue', 'chatshop'); ?></strong></p>
+            <p><?php _e('The analytics component is not available. This could be due to:', 'chatshop'); ?></p>
+            <ul>
+                <li><?php _e('Component not properly loaded', 'chatshop'); ?></li>
+                <li><?php _e('Missing component files', 'chatshop'); ?></li>
+                <li><?php _e('Component dependencies not met', 'chatshop'); ?></li>
+            </ul>
+        </div>
+
+        <?php if (defined('WP_DEBUG') && WP_DEBUG): ?>
+            <div class="notice notice-info">
+                <h3><?php _e('Debug Information', 'chatshop'); ?></h3>
+                <pre><?php echo esc_html(print_r($debug_info, true)); ?></pre>
+            </div>
+        <?php endif; ?>
+
+        <div class="card">
+            <h2><?php _e('Troubleshooting Steps', 'chatshop'); ?></h2>
+            <ol>
+                <li><?php _e('Check if premium features are enabled', 'chatshop'); ?></li>
+                <li><?php _e('Verify analytics component is enabled in settings', 'chatshop'); ?></li>
+                <li><?php _e('Check server logs for component loading errors', 'chatshop'); ?></li>
+                <li><?php _e('Deactivate and reactivate the ChatShop plugin', 'chatshop'); ?></li>
+            </ol>
         </div>
     </div>
 <?php
     return;
 }
+
+// Component is available - Display analytics dashboard
 ?>
 
-<div class="wrap chatshop-analytics-dashboard">
-    <h1 class="wp-heading-inline"><?php _e('Analytics Dashboard', 'chatshop'); ?></h1>
+<div class="wrap">
+    <h1><?php _e('Analytics Dashboard', 'chatshop'); ?></h1>
 
-    <!-- Date Range Selector -->
+    <!-- Success Notice -->
+    <div class="notice notice-success">
+        <p><?php _e('Analytics component is loaded and ready!', 'chatshop'); ?></p>
+    </div>
+
+    <!-- Analytics Header -->
     <div class="chatshop-analytics-header">
         <div class="chatshop-date-selector">
             <label for="analytics-date-range"><?php _e('Date Range:', 'chatshop'); ?></label>
             <select id="analytics-date-range" class="chatshop-date-range-select">
-                <option value="7days"><?php _e('Last 7 Days', 'chatshop'); ?></option>
+                <option value="today"><?php _e('Today', 'chatshop'); ?></option>
+                <option value="7days" selected><?php _e('Last 7 Days', 'chatshop'); ?></option>
                 <option value="30days"><?php _e('Last 30 Days', 'chatshop'); ?></option>
                 <option value="90days"><?php _e('Last 90 Days', 'chatshop'); ?></option>
-                <option value="365days"><?php _e('Last Year', 'chatshop'); ?></option>
+                <option value="this_month"><?php _e('This Month', 'chatshop'); ?></option>
+                <option value="last_month"><?php _e('Last Month', 'chatshop'); ?></option>
             </select>
         </div>
 
         <div class="chatshop-analytics-actions">
             <button type="button" class="button" id="refresh-analytics">
-                <span class="dashicons dashicons-update"></span>
-                <?php _e('Refresh', 'chatshop'); ?>
+                <?php _e('Refresh Data', 'chatshop'); ?>
             </button>
-            <button type="button" class="button" id="export-analytics">
-                <span class="dashicons dashicons-download"></span>
-                <?php _e('Export', 'chatshop'); ?>
+            <button type="button" class="button button-primary" id="export-analytics">
+                <?php _e('Export Report', 'chatshop'); ?>
             </button>
         </div>
     </div>
 
     <!-- Overview Cards -->
     <div class="chatshop-analytics-overview">
-        <div class="analytics-card" id="total-revenue-card">
-            <div class="card-icon">
-                <span class="dashicons dashicons-money-alt"></span>
-            </div>
+        <div class="analytics-card">
+            <div class="card-icon">💰</div>
             <div class="card-content">
-                <h3 class="card-value" id="total-revenue">₦0.00</h3>
-                <p class="card-label"><?php _e('Total Revenue', 'chatshop'); ?></p>
-                <span class="card-growth" id="revenue-growth">+0%</span>
+                <div class="card-value" id="total-revenue">₦0.00</div>
+                <div class="card-label"><?php _e('Total Revenue', 'chatshop'); ?></div>
             </div>
         </div>
 
-        <div class="analytics-card" id="total-conversions-card">
-            <div class="card-icon">
-                <span class="dashicons dashicons-cart"></span>
-            </div>
+        <div class="analytics-card">
+            <div class="card-icon">🔄</div>
             <div class="card-content">
-                <h3 class="card-value" id="total-conversions">0</h3>
-                <p class="card-label"><?php _e('Conversions', 'chatshop'); ?></p>
-                <span class="card-growth" id="conversion-growth">+0%</span>
+                <div class="card-value" id="total-conversions">0</div>
+                <div class="card-label"><?php _e('WhatsApp Conversions', 'chatshop'); ?></div>
             </div>
         </div>
 
-        <div class="analytics-card" id="whatsapp-interactions-card">
-            <div class="card-icon">
-                <span class="dashicons dashicons-whatsapp"></span>
-            </div>
+        <div class="analytics-card">
+            <div class="card-icon">📊</div>
             <div class="card-content">
-                <h3 class="card-value" id="whatsapp-interactions">0</h3>
-                <p class="card-label"><?php _e('WhatsApp Interactions', 'chatshop'); ?></p>
-                <span class="card-growth" id="interaction-growth">+0%</span>
+                <div class="card-value" id="conversion-rate">0%</div>
+                <div class="card-label"><?php _e('Conversion Rate', 'chatshop'); ?></div>
             </div>
         </div>
 
-        <div class="analytics-card" id="conversion-rate-card">
-            <div class="card-icon">
-                <span class="dashicons dashicons-chart-line"></span>
-            </div>
+        <div class="analytics-card">
+            <div class="card-icon">💳</div>
             <div class="card-content">
-                <h3 class="card-value" id="conversion-rate">0%</h3>
-                <p class="card-label"><?php _e('Conversion Rate', 'chatshop'); ?></p>
-                <span class="card-growth" id="rate-growth">+0%</span>
+                <div class="card-value" id="avg-order-value">₦0.00</div>
+                <div class="card-label"><?php _e('Avg Order Value', 'chatshop'); ?></div>
             </div>
         </div>
     </div>
 
-    <!-- Charts Section -->
-    <div class="chatshop-analytics-charts">
-        <div class="chart-row">
-            <!-- Revenue & Conversions Chart -->
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3><?php _e('Revenue & Conversions Over Time', 'chatshop'); ?></h3>
-                    <div class="chart-legend">
-                        <span class="legend-item revenue">
-                            <span class="legend-color"></span>
-                            <?php _e('Revenue', 'chatshop'); ?>
-                        </span>
-                        <span class="legend-item conversions">
-                            <span class="legend-color"></span>
-                            <?php _e('Conversions', 'chatshop'); ?>
-                        </span>
-                    </div>
+    <!-- Charts and Detailed Analytics -->
+    <div class="chatshop-analytics-content">
+        <div class="analytics-row">
+            <!-- Revenue Chart -->
+            <div class="analytics-section">
+                <div class="section-header">
+                    <h2><?php _e('Revenue Trend', 'chatshop'); ?></h2>
                 </div>
-                <div class="chart-canvas-container">
-                    <canvas id="revenue-conversions-chart" width="400" height="200"></canvas>
+                <div class="section-content">
+                    <div id="revenue-chart" class="chart-container">
+                        <p class="chart-placeholder"><?php _e('Loading revenue chart...', 'chatshop'); ?></p>
+                    </div>
                 </div>
             </div>
 
             <!-- Conversion Funnel -->
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3><?php _e('WhatsApp to Payment Funnel', 'chatshop'); ?></h3>
+            <div class="analytics-section">
+                <div class="section-header">
+                    <h2><?php _e('Conversion Funnel', 'chatshop'); ?></h2>
                 </div>
-                <div class="funnel-chart" id="conversion-funnel">
-                    <div class="funnel-step" data-step="messages_sent">
-                        <div class="funnel-bar">
-                            <div class="funnel-fill" style="width: 100%"></div>
-                        </div>
-                        <div class="funnel-label">
-                            <span class="step-name"><?php _e('Messages Sent', 'chatshop'); ?></span>
-                            <span class="step-count" id="messages-sent-count">0</span>
-                        </div>
-                    </div>
-
-                    <div class="funnel-step" data-step="messages_opened">
-                        <div class="funnel-bar">
-                            <div class="funnel-fill" style="width: 0%"></div>
-                        </div>
-                        <div class="funnel-label">
-                            <span class="step-name"><?php _e('Messages Opened', 'chatshop'); ?></span>
-                            <span class="step-count" id="messages-opened-count">0</span>
-                        </div>
-                    </div>
-
-                    <div class="funnel-step" data-step="links_clicked">
-                        <div class="funnel-bar">
-                            <div class="funnel-fill" style="width: 0%"></div>
-                        </div>
-                        <div class="funnel-label">
-                            <span class="step-name"><?php _e('Links Clicked', 'chatshop'); ?></span>
-                            <span class="step-count" id="links-clicked-count">0</span>
-                        </div>
-                    </div>
-
-                    <div class="funnel-step" data-step="payments_initiated">
-                        <div class="funnel-bar">
-                            <div class="funnel-fill" style="width: 0%"></div>
-                        </div>
-                        <div class="funnel-label">
-                            <span class="step-name"><?php _e('Payments Initiated', 'chatshop'); ?></span>
-                            <span class="step-count" id="payments-initiated-count">0</span>
-                        </div>
-                    </div>
-
-                    <div class="funnel-step" data-step="payments_completed">
-                        <div class="funnel-bar">
-                            <div class="funnel-fill" style="width: 0%"></div>
-                        </div>
-                        <div class="funnel-label">
-                            <span class="step-name"><?php _e('Payments Completed', 'chatshop'); ?></span>
-                            <span class="step-count" id="payments-completed-count">0</span>
-                        </div>
+                <div class="section-content">
+                    <div id="conversion-funnel" class="funnel-container">
+                        <p class="chart-placeholder"><?php _e('Loading conversion funnel...', 'chatshop'); ?></p>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="chart-row">
-            <!-- Revenue Attribution -->
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3><?php _e('Revenue Attribution', 'chatshop'); ?></h3>
+        <div class="analytics-row">
+            <!-- Top Gateways -->
+            <div class="analytics-section">
+                <div class="section-header">
+                    <h2><?php _e('Top Performing Gateways', 'chatshop'); ?></h2>
                 </div>
-                <div class="chart-canvas-container">
-                    <canvas id="revenue-attribution-chart" width="300" height="300"></canvas>
-                </div>
-                <div class="attribution-legend" id="attribution-legend">
-                    <!-- Legend items will be populated by JavaScript -->
+                <div class="section-content">
+                    <div class="performance-table">
+                        <div class="table-header">
+                            <div class="header-item"><?php _e('Gateway', 'chatshop'); ?></div>
+                            <div class="header-item"><?php _e('Transactions', 'chatshop'); ?></div>
+                            <div class="header-item"><?php _e('Revenue', 'chatshop'); ?></div>
+                        </div>
+                        <div class="performance-list" id="gateway-performance-list">
+                            <p class="loading-text"><?php _e('Loading gateway performance...', 'chatshop'); ?></p>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Gateway Performance -->
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3><?php _e('Gateway Performance', 'chatshop'); ?></h3>
+            <!-- Revenue Attribution -->
+            <div class="analytics-section">
+                <div class="section-header">
+                    <h2><?php _e('Revenue by Source', 'chatshop'); ?></h2>
                 </div>
-                <div class="gateway-performance" id="gateway-performance">
-                    <div class="performance-header">
-                        <div class="header-item"><?php _e('Gateway', 'chatshop'); ?></div>
-                        <div class="header-item"><?php _e('Success Rate', 'chatshop'); ?></div>
-                        <div class="header-item"><?php _e('Avg. Value', 'chatshop'); ?></div>
-                        <div class="header-item"><?php _e('Total Revenue', 'chatshop'); ?></div>
-                    </div>
-                    <div class="performance-list" id="gateway-performance-list">
-                        <!-- Gateway performance items will be populated by JavaScript -->
+                <div class="section-content">
+                    <div id="revenue-attribution" class="attribution-container">
+                        <p class="chart-placeholder"><?php _e('Loading revenue attribution...', 'chatshop'); ?></p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Component Status (for debugging) -->
+    <?php if (defined('WP_DEBUG') && WP_DEBUG): ?>
+        <div class="analytics-section">
+            <div class="section-header">
+                <h2><?php _e('Component Status (Debug)', 'chatshop'); ?></h2>
+            </div>
+            <div class="section-content">
+                <pre><?php echo esc_html(print_r($debug_info, true)); ?></pre>
+                <?php if (method_exists($analytics, 'get_status')): ?>
+                    <h4><?php _e('Analytics Component Status:', 'chatshop'); ?></h4>
+                    <pre><?php echo esc_html(print_r($analytics->get_status(), true)); ?></pre>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
 
     <!-- Loading Indicator -->
     <div class="chatshop-loading" id="analytics-loading" style="display: none;">
@@ -264,17 +255,14 @@ if (!$analytics) {
     <!-- Error Message -->
     <div class="chatshop-error" id="analytics-error" style="display: none;">
         <p></p>
-        <button type="button" class="button" onclick="ChatShopAnalytics.loadAnalytics()">
+        <button type="button" class="button" onclick="loadAnalyticsData()">
             <?php _e('Retry', 'chatshop'); ?>
         </button>
     </div>
 </div>
 
+<!-- Analytics Styles -->
 <style>
-    .chatshop-analytics-dashboard {
-        margin: 20px 0;
-    }
-
     .chatshop-analytics-header {
         display: flex;
         justify-content: space-between;
@@ -324,289 +312,111 @@ if (!$analytics) {
 
     .card-icon {
         margin-right: 15px;
+        font-size: 32px;
         padding: 15px;
         border-radius: 50%;
-        background: #f0f6fc;
-    }
-
-    .card-icon .dashicons {
-        font-size: 24px;
-        color: #135e96;
-    }
-
-    .card-content {
-        flex: 1;
+        background: #f0f0f1;
     }
 
     .card-value {
-        font-size: 28px;
-        font-weight: 700;
-        margin: 0 0 5px 0;
+        font-size: 24px;
+        font-weight: bold;
         color: #1d2327;
     }
 
     .card-label {
-        margin: 0 0 8px 0;
-        color: #646970;
         font-size: 14px;
+        color: #646970;
+        margin-top: 5px;
     }
 
-    .card-growth {
-        font-size: 12px;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-weight: 600;
-    }
-
-    .card-growth.positive {
-        background: #d1e7dd;
-        color: #0f5132;
-    }
-
-    .card-growth.negative {
-        background: #f8d7da;
-        color: #842029;
-    }
-
-    /* Charts */
-    .chatshop-analytics-charts {
+    /* Analytics Content */
+    .chatshop-analytics-content {
         display: flex;
         flex-direction: column;
         gap: 30px;
     }
 
-    .chart-row {
+    .analytics-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 30px;
-    }
-
-    .chart-container {
-        background: #fff;
-        border: 1px solid #c3c4c7;
-        border-radius: 4px;
-        padding: 20px;
-    }
-
-    .chart-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        padding-bottom: 15px;
-        border-bottom: 1px solid #f0f0f1;
-    }
-
-    .chart-header h3 {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 600;
-    }
-
-    .chart-legend {
-        display: flex;
         gap: 20px;
     }
 
-    .legend-item {
-        display: flex;
-        align-items: center;
-        font-size: 12px;
-    }
-
-    .legend-color {
-        width: 12px;
-        height: 12px;
-        border-radius: 2px;
-        margin-right: 6px;
-    }
-
-    .legend-item.revenue .legend-color {
-        background: #135e96;
-    }
-
-    .legend-item.conversions .legend-color {
-        background: #00a32a;
-    }
-
-    .chart-canvas-container {
-        position: relative;
-        height: 300px;
-    }
-
-    /* Funnel Chart */
-    .funnel-chart {
-        display: flex;
-        flex-direction: column;
-        gap: 15px;
-    }
-
-    .funnel-step {
-        display: flex;
-        align-items: center;
-        gap: 15px;
-    }
-
-    .funnel-bar {
-        flex: 1;
-        height: 30px;
-        background: #f0f0f1;
-        border-radius: 15px;
-        overflow: hidden;
-        position: relative;
-    }
-
-    .funnel-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #135e96, #2271b1);
-        border-radius: 15px;
-        transition: width 0.6s ease;
-    }
-
-    .funnel-label {
-        min-width: 160px;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-
-    .step-name {
-        font-weight: 600;
-        font-size: 13px;
-    }
-
-    .step-count {
-        color: #646970;
-        font-size: 12px;
-    }
-
-    /* Gateway Performance */
-    .gateway-performance {
-        font-size: 14px;
-    }
-
-    .performance-header {
-        display: grid;
-        grid-template-columns: 2fr 1fr 1fr 1fr;
-        gap: 15px;
-        padding: 12px 0;
-        border-bottom: 2px solid #f0f0f1;
-        font-weight: 600;
-        color: #1d2327;
-    }
-
-    .performance-list {
-        display: flex;
-        flex-direction: column;
-    }
-
-    .performance-item {
-        display: grid;
-        grid-template-columns: 2fr 1fr 1fr 1fr;
-        gap: 15px;
-        padding: 12px 0;
-        border-bottom: 1px solid #f6f7f7;
-        align-items: center;
-    }
-
-    .performance-item:last-child {
-        border-bottom: none;
-    }
-
-    .gateway-name {
-        font-weight: 600;
-        text-transform: capitalize;
-    }
-
-    .success-rate {
-        font-weight: 600;
-    }
-
-    .success-rate.high {
-        color: #00a32a;
-    }
-
-    .success-rate.medium {
-        color: #dba617;
-    }
-
-    .success-rate.low {
-        color: #d63638;
-    }
-
-    /* Attribution Legend */
-    .attribution-legend {
-        margin-top: 20px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 15px;
-        justify-content: center;
-    }
-
-    .attribution-item {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-    }
-
-    .attribution-color {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-    }
-
-    /* Premium Notice */
-    .chatshop-premium-notice {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 40px;
-        border-radius: 8px;
-        text-align: center;
-        margin: 20px 0;
-    }
-
-    .chatshop-premium-content h2 {
-        color: white;
-        margin-bottom: 15px;
-    }
-
-    .chatshop-premium-features {
-        margin: 30px 0;
-    }
-
-    .chatshop-premium-features ul {
-        list-style: none;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 10px;
-        max-width: 600px;
-        margin: 0 auto;
-        padding: 0;
-    }
-
-    .chatshop-premium-features li {
-        text-align: left;
-        padding: 5px 0;
-    }
-
-    /* Loading and Error States */
-    .chatshop-loading {
-        text-align: center;
-        padding: 60px 20px;
+    .analytics-section {
         background: #fff;
         border: 1px solid #c3c4c7;
         border-radius: 4px;
     }
 
+    .section-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid #c3c4c7;
+        background: #f6f7f7;
+    }
+
+    .section-header h2 {
+        margin: 0;
+        font-size: 16px;
+        color: #1d2327;
+    }
+
+    .section-content {
+        padding: 20px;
+    }
+
+    .chart-container,
+    .funnel-container,
+    .attribution-container {
+        min-height: 300px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .chart-placeholder,
+    .loading-text {
+        color: #646970;
+        font-style: italic;
+    }
+
+    .performance-table {
+        width: 100%;
+    }
+
+    .table-header {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+        padding: 10px 0;
+        border-bottom: 1px solid #c3c4c7;
+        font-weight: 600;
+    }
+
+    .performance-list {
+        padding: 10px 0;
+    }
+
+    .chatshop-loading {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(255, 255, 255, 0.9);
+        padding: 20px;
+        border-radius: 4px;
+        text-align: center;
+        z-index: 9999;
+    }
+
     .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 4px solid #f0f0f1;
-        border-top: 4px solid #135e96;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #0073aa;
         border-radius: 50%;
         animation: spin 1s linear infinite;
-        margin: 0 auto 20px;
+        margin: 0 auto 10px;
     }
 
     @keyframes spin {
@@ -620,48 +430,117 @@ if (!$analytics) {
     }
 
     .chatshop-error {
-        text-align: center;
-        padding: 40px 20px;
+        background: #fff;
+        border-left: 4px solid #dc3232;
+        padding: 15px;
+        margin: 20px 0;
+    }
+
+    .chatshop-premium-notice {
         background: #fff;
         border: 1px solid #c3c4c7;
         border-radius: 4px;
-        color: #d63638;
+        padding: 40px;
+        text-align: center;
+        margin: 20px 0;
     }
 
-    /* Responsive Design */
-    @media (max-width: 1200px) {
-        .chart-row {
-            grid-template-columns: 1fr;
-        }
+    .chatshop-premium-content h2 {
+        color: #f39c12;
+        margin-bottom: 15px;
+    }
+
+    .chatshop-premium-features ul {
+        text-align: left;
+        max-width: 400px;
+        margin: 20px auto;
+    }
+
+    .chatshop-premium-features li {
+        margin-bottom: 8px;
+        color: #646970;
     }
 
     @media (max-width: 768px) {
-        .chatshop-analytics-header {
-            flex-direction: column;
-            gap: 20px;
-            align-items: stretch;
+        .analytics-row {
+            grid-template-columns: 1fr;
         }
 
         .chatshop-analytics-overview {
             grid-template-columns: 1fr;
         }
 
-        .performance-header,
-        .performance-item {
-            grid-template-columns: 1fr;
-            gap: 5px;
-        }
-
-        .performance-header {
-            display: none;
-        }
-
-        .performance-item {
-            display: block;
-            padding: 15px;
-            background: #f6f7f7;
-            border-radius: 4px;
-            margin-bottom: 10px;
+        .chatshop-analytics-header {
+            flex-direction: column;
+            gap: 15px;
         }
     }
 </style>
+
+<!-- Basic Analytics JavaScript -->
+<script>
+    jQuery(document).ready(function($) {
+        // Initialize analytics dashboard
+        loadAnalyticsData();
+
+        // Date range change handler
+        $('#analytics-date-range').on('change', function() {
+            loadAnalyticsData();
+        });
+
+        // Refresh button handler
+        $('#refresh-analytics').on('click', function() {
+            loadAnalyticsData();
+        });
+
+        // Export button handler
+        $('#export-analytics').on('click', function() {
+            alert('<?php _e('Export functionality will be implemented in the next update.', 'chatshop'); ?>');
+        });
+    });
+
+    function loadAnalyticsData() {
+        const dateRange = jQuery('#analytics-date-range').val();
+
+        // Show loading
+        jQuery('#analytics-loading').show();
+
+        // Simulate loading with demo data for now
+        setTimeout(function() {
+            // Hide loading
+            jQuery('#analytics-loading').hide();
+
+            // Update overview cards with demo data
+            jQuery('#total-revenue').text('₦45,280.00');
+            jQuery('#total-conversions').text('127');
+            jQuery('#conversion-rate').text('15.3%');
+            jQuery('#avg-order-value').text('₦356.50');
+
+            // Update gateway performance
+            const gatewayHtml = `
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                <div>Paystack</div>
+                <div>89</div>
+                <div>₦31,780.00</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                <div>PayPal</div>
+                <div>24</div>
+                <div>₦8,960.00</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 8px 0;">
+                <div>Flutterwave</div>
+                <div>14</div>
+                <div>₦4,540.00</div>
+            </div>
+        `;
+            jQuery('#gateway-performance-list').html(gatewayHtml);
+
+            // Update chart placeholders
+            jQuery('#revenue-chart .chart-placeholder').text('<?php _e('Demo revenue chart data loaded successfully!', 'chatshop'); ?>');
+            jQuery('#conversion-funnel .chart-placeholder').text('<?php _e('Demo conversion funnel loaded successfully!', 'chatshop'); ?>');
+            jQuery('#revenue-attribution .chart-placeholder').text('<?php _e('Demo attribution data loaded successfully!', 'chatshop'); ?>');
+
+        }, 1000);
+    }
+</script>

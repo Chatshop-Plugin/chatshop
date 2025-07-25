@@ -55,11 +55,22 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
     private $cache_duration = 3600;
 
     /**
-     * Initialize component
+     * Constructor
      *
      * @since 1.0.0
      */
-    protected function init()
+    public function __construct()
+    {
+        // Initialize the component
+        $this->init();
+    }
+
+    /**
+     * Initialize component - MADE PUBLIC TO FIX VISIBILITY ERROR
+     *
+     * @since 1.0.0
+     */
+    public function init()
     {
         global $wpdb;
 
@@ -69,6 +80,11 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
         $this->table_name = $wpdb->prefix . 'chatshop_analytics';
 
         $this->init_hooks();
+
+        // Log successful initialization
+        if (function_exists('chatshop_log')) {
+            chatshop_log('Analytics component initialized successfully', 'info');
+        }
     }
 
     /**
@@ -160,10 +176,14 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
         $result = dbDelta($sql);
 
         if ($result) {
-            chatshop_log('Analytics database table created successfully', 'info');
+            if (function_exists('chatshop_log')) {
+                chatshop_log('Analytics database table created successfully', 'info');
+            }
             return true;
         } else {
-            chatshop_log('Failed to create analytics database table', 'error');
+            if (function_exists('chatshop_log')) {
+                chatshop_log('Failed to create analytics database table', 'error');
+            }
             return false;
         }
     }
@@ -288,6 +308,7 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
                 $data = $this->get_overview_metrics($date_filter);
         }
 
+        // Cache for 1 hour
         set_transient($cache_key, $data, $this->cache_duration);
 
         return $data;
@@ -297,73 +318,98 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
      * Get overview metrics
      *
      * @since 1.0.0
-     * @param array $date_filter Date filter array
+     * @param array $date_filter Date filter conditions
      * @return array Overview metrics
      */
     private function get_overview_metrics($date_filter)
     {
         global $wpdb;
 
-        $start_date = $date_filter['start'];
-        $end_date = $date_filter['end'];
-
-        // Total revenue
-        $total_revenue = $wpdb->get_var($wpdb->prepare(
-            "SELECT SUM(revenue) FROM {$this->table_name} 
-             WHERE metric_type = 'payment' AND metric_date BETWEEN %s AND %s",
-            $start_date,
-            $end_date
-        ));
-
-        // Total conversions
-        $total_conversions = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} 
-             WHERE metric_type = 'conversion' AND metric_date BETWEEN %s AND %s",
-            $start_date,
-            $end_date
-        ));
-
-        // WhatsApp interactions
-        $whatsapp_interactions = $wpdb->get_var($wpdb->prepare(
-            "SELECT SUM(metric_value) FROM {$this->table_name} 
-             WHERE metric_type = 'interaction' AND source_type = 'whatsapp' 
-             AND metric_date BETWEEN %s AND %s",
-            $start_date,
-            $end_date
-        ));
-
-        // Active contacts
-        $active_contacts = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(DISTINCT contact_id) FROM {$this->table_name} 
-             WHERE metric_type = 'interaction' AND metric_date BETWEEN %s AND %s",
-            $start_date,
-            $end_date
-        ));
-
-        // Daily breakdown for charts
-        $daily_data = $wpdb->get_results($wpdb->prepare(
-            "SELECT metric_date, 
-                    SUM(CASE WHEN metric_type = 'payment' THEN revenue ELSE 0 END) as daily_revenue,
-                    COUNT(CASE WHEN metric_type = 'conversion' THEN 1 END) as daily_conversions,
-                    SUM(CASE WHEN metric_type = 'interaction' THEN metric_value ELSE 0 END) as daily_interactions
-             FROM {$this->table_name} 
-             WHERE metric_date BETWEEN %s AND %s 
-             GROUP BY metric_date 
-             ORDER BY metric_date",
-            $start_date,
-            $end_date
-        ), ARRAY_A);
-
-        return array(
-            'totals' => array(
-                'revenue' => floatval($total_revenue ?? 0),
-                'conversions' => intval($total_conversions ?? 0),
-                'interactions' => intval($whatsapp_interactions ?? 0),
-                'active_contacts' => intval($active_contacts ?? 0)
-            ),
-            'daily_breakdown' => $daily_data,
-            'conversion_rate' => $whatsapp_interactions > 0 ? round(($total_conversions / $whatsapp_interactions) * 100, 2) : 0
+        $data = array(
+            'total_revenue' => 0,
+            'total_transactions' => 0,
+            'whatsapp_conversions' => 0,
+            'conversion_rate' => 0,
+            'average_order_value' => 0,
+            'top_gateways' => array(),
+            'revenue_trend' => array()
         );
+
+        // Get total revenue for date range
+        $revenue_query = $wpdb->prepare(
+            "SELECT SUM(revenue) as total_revenue, COUNT(*) as total_transactions
+             FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        );
+
+        $revenue_result = $wpdb->get_row($revenue_query);
+        if ($revenue_result) {
+            $data['total_revenue'] = (float) $revenue_result->total_revenue;
+            $data['total_transactions'] = (int) $revenue_result->total_transactions;
+        }
+
+        // Calculate average order value
+        if ($data['total_transactions'] > 0) {
+            $data['average_order_value'] = $data['total_revenue'] / $data['total_transactions'];
+        }
+
+        // Get WhatsApp conversions
+        $whatsapp_conversions = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name}
+             WHERE metric_type = 'whatsapp_conversion'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        $data['whatsapp_conversions'] = (int) $whatsapp_conversions;
+
+        // Calculate conversion rate
+        $total_whatsapp_interactions = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name}
+             WHERE metric_type = 'whatsapp_interaction'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        if ($total_whatsapp_interactions > 0) {
+            $data['conversion_rate'] = ($data['whatsapp_conversions'] / $total_whatsapp_interactions) * 100;
+        }
+
+        // Get top performing gateways
+        $gateway_query = $wpdb->prepare(
+            "SELECT gateway, SUM(revenue) as gateway_revenue, COUNT(*) as gateway_transactions
+             FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s
+             GROUP BY gateway
+             ORDER BY gateway_revenue DESC
+             LIMIT 5",
+            $date_filter['start'],
+            $date_filter['end']
+        );
+
+        $data['top_gateways'] = $wpdb->get_results($gateway_query);
+
+        // Get revenue trend (daily data for chart)
+        $trend_query = $wpdb->prepare(
+            "SELECT metric_date, SUM(revenue) as daily_revenue
+             FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s
+             GROUP BY metric_date
+             ORDER BY metric_date ASC",
+            $date_filter['start'],
+            $date_filter['end']
+        );
+
+        $data['revenue_trend'] = $wpdb->get_results($trend_query);
+
+        return $data;
     }
 
     /**
@@ -373,93 +419,68 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
      * @param string $date_range Date range filter
      * @return array Conversion statistics
      */
-    public function get_conversion_statistics($date_range)
+    private function get_conversion_statistics($date_range)
     {
+        $date_filter = $this->get_date_filter($date_range);
         global $wpdb;
 
-        $date_filter = $this->get_date_filter($date_range);
-        $start_date = $date_filter['start'];
-        $end_date = $date_filter['end'];
-
-        // Conversion funnel data
-        $funnel_data = $wpdb->get_results($wpdb->prepare(
-            "SELECT 
-                COUNT(CASE WHEN metric_name = 'message_sent' THEN 1 END) as messages_sent,
-                COUNT(CASE WHEN metric_name = 'message_opened' THEN 1 END) as messages_opened,
-                COUNT(CASE WHEN metric_name = 'link_clicked' THEN 1 END) as links_clicked,
-                COUNT(CASE WHEN metric_name = 'payment_initiated' THEN 1 END) as payments_initiated,
-                COUNT(CASE WHEN metric_name = 'payment_completed' THEN 1 END) as payments_completed
-             FROM {$this->table_name} 
-             WHERE metric_type = 'interaction' AND metric_date BETWEEN %s AND %s",
-            $start_date,
-            $end_date
-        ), ARRAY_A);
-
-        // Gateway conversion rates
-        $gateway_conversions = $wpdb->get_results($wpdb->prepare(
-            "SELECT gateway,
-                    COUNT(*) as total_attempts,
-                    COUNT(CASE WHEN metric_name = 'payment_completed' THEN 1 END) as successful_payments,
-                    AVG(revenue) as avg_revenue
-             FROM {$this->table_name} 
-             WHERE metric_type = 'payment' AND metric_date BETWEEN %s AND %s 
-             GROUP BY gateway",
-            $start_date,
-            $end_date
-        ), ARRAY_A);
-
-        return array(
-            'funnel' => $funnel_data[0] ?? array(),
-            'gateway_performance' => $gateway_conversions
+        $data = array(
+            'funnel_data' => array(),
+            'source_breakdown' => array(),
+            'conversion_by_day' => array()
         );
+
+        // Get conversion funnel data
+        $funnel_steps = array(
+            'whatsapp_interaction' => __('WhatsApp Interactions', 'chatshop'),
+            'payment_link_click' => __('Payment Link Clicks', 'chatshop'),
+            'payment_initiated' => __('Payment Initiated', 'chatshop'),
+            'payment_completed' => __('Payment Completed', 'chatshop')
+        );
+
+        foreach ($funnel_steps as $metric => $label) {
+            $count = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$this->table_name}
+                 WHERE metric_type = %s
+                 AND metric_date BETWEEN %s AND %s",
+                $metric,
+                $date_filter['start'],
+                $date_filter['end']
+            ));
+
+            $data['funnel_data'][] = array(
+                'step' => $label,
+                'count' => (int) $count
+            );
+        }
+
+        return $data;
     }
 
     /**
-     * Get revenue attribution data
+     * Get revenue attribution
      *
      * @since 1.0.0
      * @param string $date_range Date range filter
      * @return array Revenue attribution data
      */
-    public function get_revenue_attribution($date_range)
+    private function get_revenue_attribution($date_range)
     {
+        $date_filter = $this->get_date_filter($date_range);
         global $wpdb;
 
-        $date_filter = $this->get_date_filter($date_range);
-        $start_date = $date_filter['start'];
-        $end_date = $date_filter['end'];
-
-        // Revenue by source
-        $revenue_by_source = $wpdb->get_results($wpdb->prepare(
-            "SELECT source_type,
-                    SUM(revenue) as total_revenue,
-                    COUNT(*) as transaction_count,
-                    AVG(revenue) as avg_transaction_value
-             FROM {$this->table_name} 
-             WHERE metric_type = 'payment' AND metric_date BETWEEN %s AND %s 
-             GROUP BY source_type 
-             ORDER BY total_revenue DESC",
-            $start_date,
-            $end_date
-        ), ARRAY_A);
-
-        // Revenue by gateway
-        $revenue_by_gateway = $wpdb->get_results($wpdb->prepare(
-            "SELECT gateway,
-                    SUM(revenue) as total_revenue,
-                    COUNT(*) as transaction_count
-             FROM {$this->table_name} 
-             WHERE metric_type = 'payment' AND metric_date BETWEEN %s AND %s 
-             GROUP BY gateway 
-             ORDER BY total_revenue DESC",
-            $start_date,
-            $end_date
-        ), ARRAY_A);
-
-        return array(
-            'by_source' => $revenue_by_source,
-            'by_gateway' => $revenue_by_gateway
+        $attribution_query = $wpdb->prepare(
+            "SELECT source_type, SUM(revenue) as source_revenue
+             FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s
+             GROUP BY source_type
+             ORDER BY source_revenue DESC",
+            $date_filter['start'],
+            $date_filter['end']
         );
+
+        return $wpdb->get_results($attribution_query);
     }
 
     /**
@@ -468,101 +489,45 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
      * @since 1.0.0
      * @return array Performance metrics
      */
-    public function get_performance_metrics()
+    private function get_performance_metrics()
     {
         global $wpdb;
 
-        // Get current vs previous period comparison
-        $current_week = $this->get_date_filter('7days');
-        $previous_week = array(
-            'start' => date('Y-m-d', strtotime('-14 days')),
-            'end' => date('Y-m-d', strtotime('-8 days'))
+        // Get recent performance data (last 30 days)
+        $date_filter = $this->get_date_filter('30days');
+
+        $performance_query = $wpdb->prepare(
+            "SELECT gateway, 
+                    AVG(metric_value) as avg_processing_time,
+                    SUM(CASE WHEN metric_type = 'payment_completed' THEN 1 ELSE 0 END) as successful_payments,
+                    SUM(CASE WHEN metric_type = 'payment_failed' THEN 1 ELSE 0 END) as failed_payments
+             FROM {$this->table_name}
+             WHERE metric_date BETWEEN %s AND %s
+             AND gateway != ''
+             GROUP BY gateway
+             ORDER BY successful_payments DESC",
+            $date_filter['start'],
+            $date_filter['end']
         );
 
-        $current_metrics = $this->get_period_metrics($current_week);
-        $previous_metrics = $this->get_period_metrics($previous_week);
-
-        return array(
-            'current_period' => $current_metrics,
-            'previous_period' => $previous_metrics,
-            'growth_rates' => $this->calculate_growth_rates($current_metrics, $previous_metrics)
-        );
+        return $wpdb->get_results($performance_query);
     }
 
     /**
-     * Track payment conversion
+     * Get date filter conditions
      *
      * @since 1.0.0
-     * @param array  $payment_data Payment data
-     * @param string $gateway Gateway used
-     */
-    public function track_payment_conversion($payment_data, $gateway)
-    {
-        global $wpdb;
-
-        $data = array(
-            'metric_type' => 'payment',
-            'metric_name' => 'payment_completed',
-            'metric_value' => 1,
-            'metric_date' => current_time('Y-m-d'),
-            'source_type' => 'whatsapp',
-            'contact_id' => $payment_data['contact_id'] ?? null,
-            'payment_id' => $payment_data['reference'] ?? '',
-            'gateway' => $gateway,
-            'revenue' => ($payment_data['amount'] ?? 0) / 100, // Convert from kobo to naira
-            'currency' => $payment_data['currency'] ?? 'NGN',
-            'meta_data' => wp_json_encode($payment_data)
-        );
-
-        $wpdb->insert($this->table_name, $data);
-
-        // Also track as conversion
-        $conversion_data = $data;
-        $conversion_data['metric_type'] = 'conversion';
-        $conversion_data['metric_name'] = 'whatsapp_to_payment';
-
-        $wpdb->insert($this->table_name, $conversion_data);
-
-        chatshop_log('Payment conversion tracked', 'info', $data);
-    }
-
-    /**
-     * Track contact interaction
-     *
-     * @since 1.0.0
-     * @param int    $contact_id Contact ID
-     * @param string $interaction_type Type of interaction
-     * @param array  $meta Additional data
-     */
-    public function track_contact_interaction($contact_id, $interaction_type, $meta = array())
-    {
-        global $wpdb;
-
-        $data = array(
-            'metric_type' => 'interaction',
-            'metric_name' => $interaction_type,
-            'metric_value' => 1,
-            'metric_date' => current_time('Y-m-d'),
-            'source_type' => 'whatsapp',
-            'contact_id' => $contact_id,
-            'meta_data' => wp_json_encode($meta)
-        );
-
-        $wpdb->insert($this->table_name, $data);
-    }
-
-    /**
-     * Get date filter array
-     *
-     * @since 1.0.0
-     * @param string $range Date range string
-     * @return array Date filter with start and end dates
+     * @param string $range Date range identifier
+     * @return array Date filter array with start and end dates
      */
     private function get_date_filter($range)
     {
         $end_date = current_time('Y-m-d');
 
         switch ($range) {
+            case 'today':
+                $start_date = $end_date;
+                break;
             case '7days':
                 $start_date = date('Y-m-d', strtotime('-7 days'));
                 break;
@@ -572,8 +537,12 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
             case '90days':
                 $start_date = date('Y-m-d', strtotime('-90 days'));
                 break;
-            case '365days':
-                $start_date = date('Y-m-d', strtotime('-365 days'));
+            case 'this_month':
+                $start_date = date('Y-m-01');
+                break;
+            case 'last_month':
+                $start_date = date('Y-m-01', strtotime('last month'));
+                $end_date = date('Y-m-t', strtotime('last month'));
                 break;
             default:
                 $start_date = date('Y-m-d', strtotime('-7 days'));
@@ -586,90 +555,329 @@ class ChatShop_Analytics extends ChatShop_Abstract_Component
     }
 
     /**
-     * Get metrics for a specific period
+     * Track payment conversion
      *
      * @since 1.0.0
-     * @param array $date_filter Date filter
-     * @return array Period metrics
+     * @param array $payment_data Payment data
+     * @param string $gateway Gateway identifier
      */
-    private function get_period_metrics($date_filter)
+    public function track_payment_conversion($payment_data, $gateway)
     {
+        if (!chatshop_is_premium()) {
+            return;
+        }
+
         global $wpdb;
 
-        $revenue = $wpdb->get_var($wpdb->prepare(
-            "SELECT SUM(revenue) FROM {$this->table_name} 
-             WHERE metric_type = 'payment' AND metric_date BETWEEN %s AND %s",
-            $date_filter['start'],
-            $date_filter['end']
-        ));
-
-        $conversions = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} 
-             WHERE metric_type = 'conversion' AND metric_date BETWEEN %s AND %s",
-            $date_filter['start'],
-            $date_filter['end']
-        ));
-
-        return array(
-            'revenue' => floatval($revenue ?? 0),
-            'conversions' => intval($conversions ?? 0)
+        $metric_data = array(
+            'metric_type' => 'payment_completed',
+            'metric_name' => 'conversion',
+            'metric_value' => 1,
+            'metric_date' => current_time('Y-m-d'),
+            'source_type' => $payment_data['source_type'] ?? 'direct',
+            'source_id' => $payment_data['source_id'] ?? '',
+            'contact_id' => $payment_data['contact_id'] ?? null,
+            'payment_id' => $payment_data['payment_id'] ?? '',
+            'gateway' => $gateway,
+            'revenue' => $payment_data['amount'] ?? 0,
+            'currency' => $payment_data['currency'] ?? 'NGN',
+            'meta_data' => maybe_serialize($payment_data),
+            'created_at' => current_time('mysql'),
+            'updated_at' => current_time('mysql')
         );
+
+        $wpdb->insert($this->table_name, $metric_data);
+
+        // Clear related caches
+        $this->clear_analytics_cache();
     }
 
     /**
-     * Calculate growth rates between periods
+     * Track contact interaction
      *
      * @since 1.0.0
-     * @param array $current Current period metrics
-     * @param array $previous Previous period metrics
-     * @return array Growth rates
+     * @param int $contact_id Contact ID
+     * @param string $interaction_type Type of interaction
+     * @param array $interaction_data Additional interaction data
      */
-    private function calculate_growth_rates($current, $previous)
+    public function track_contact_interaction($contact_id, $interaction_type, $interaction_data = array())
     {
-        $revenue_growth = $previous['revenue'] > 0
-            ? round((($current['revenue'] - $previous['revenue']) / $previous['revenue']) * 100, 2)
-            : 0;
+        if (!chatshop_is_premium()) {
+            return;
+        }
 
-        $conversion_growth = $previous['conversions'] > 0
-            ? round((($current['conversions'] - $previous['conversions']) / $previous['conversions']) * 100, 2)
-            : 0;
+        global $wpdb;
 
-        return array(
-            'revenue_growth' => $revenue_growth,
-            'conversion_growth' => $conversion_growth
+        $metric_data = array(
+            'metric_type' => 'whatsapp_interaction',
+            'metric_name' => $interaction_type,
+            'metric_value' => 1,
+            'metric_date' => current_time('Y-m-d'),
+            'source_type' => 'whatsapp',
+            'source_id' => $interaction_data['message_id'] ?? '',
+            'contact_id' => $contact_id,
+            'meta_data' => maybe_serialize($interaction_data),
+            'created_at' => current_time('mysql'),
+            'updated_at' => current_time('mysql')
         );
+
+        $wpdb->insert($this->table_name, $metric_data);
+
+        // Clear related caches
+        $this->clear_analytics_cache();
     }
 
     /**
-     * Aggregate daily analytics (cron job)
+     * Aggregate daily analytics
      *
      * @since 1.0.0
      */
     public function aggregate_daily_analytics()
     {
-        // Clean up old analytics data (older than 2 years)
+        if (!chatshop_is_premium()) {
+            return;
+        }
+
+        // This method can be expanded to perform daily analytics aggregations
+        // such as calculating daily summaries, cleaning up old data, etc.
+
         global $wpdb;
 
-        $cutoff_date = date('Y-m-d', strtotime('-2 years'));
+        $yesterday = date('Y-m-d', strtotime('-1 day'));
 
-        $deleted = $wpdb->query($wpdb->prepare(
-            "DELETE FROM {$this->table_name} WHERE metric_date < %s",
-            $cutoff_date
+        // Example: Create daily summary records
+        $summary_data = array(
+            'metric_type' => 'daily_summary',
+            'metric_name' => 'total_interactions',
+            'metric_value' => $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$this->table_name} 
+                 WHERE metric_type = 'whatsapp_interaction' 
+                 AND metric_date = %s",
+                $yesterday
+            )),
+            'metric_date' => $yesterday,
+            'created_at' => current_time('mysql'),
+            'updated_at' => current_time('mysql')
+        );
+
+        // Insert summary if it doesn't exist
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$this->table_name} 
+             WHERE metric_type = 'daily_summary' 
+             AND metric_name = 'total_interactions' 
+             AND metric_date = %s",
+            $yesterday
         ));
 
-        if ($deleted) {
-            chatshop_log("Cleaned up {$deleted} old analytics records", 'info');
+        if (!$existing) {
+            $wpdb->insert($this->table_name, $summary_data);
+        }
+
+        // Clear old caches
+        $this->clear_analytics_cache();
+    }
+
+    /**
+     * Clear analytics cache
+     *
+     * @since 1.0.0
+     */
+    private function clear_analytics_cache()
+    {
+        $cache_keys = array(
+            'chatshop_analytics_7days_overview',
+            'chatshop_analytics_30days_overview',
+            'chatshop_analytics_90days_overview',
+            'chatshop_analytics_today_overview',
+            'chatshop_analytics_this_month_overview',
+            'chatshop_analytics_last_month_overview'
+        );
+
+        foreach ($cache_keys as $key) {
+            delete_transient($key);
         }
     }
 
     /**
-     * Get table name
+     * Get engagement metrics
      *
      * @since 1.0.0
-     * @return string Table name
+     * @param array $date_filter Date filter conditions
+     * @return array Engagement metrics
      */
-    public function get_table_name()
+    private function get_engagement_metrics($date_filter)
     {
-        return $this->table_name;
+        global $wpdb;
+
+        $data = array(
+            'total_interactions' => 0,
+            'unique_contacts' => 0,
+            'messages_sent' => 0,
+            'messages_received' => 0,
+            'response_rate' => 0
+        );
+
+        // Get total interactions
+        $data['total_interactions'] = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name}
+             WHERE metric_type = 'whatsapp_interaction'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        // Get unique contacts
+        $data['unique_contacts'] = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT contact_id) FROM {$this->table_name}
+             WHERE metric_type = 'whatsapp_interaction'
+             AND metric_date BETWEEN %s AND %s
+             AND contact_id IS NOT NULL",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        // Get messages sent
+        $data['messages_sent'] = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name}
+             WHERE metric_type = 'whatsapp_interaction'
+             AND metric_name = 'message_sent'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        // Get messages received
+        $data['messages_received'] = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name}
+             WHERE metric_type = 'whatsapp_interaction'
+             AND metric_name = 'message_received'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        // Calculate response rate
+        if ($data['messages_sent'] > 0) {
+            $data['response_rate'] = ($data['messages_received'] / $data['messages_sent']) * 100;
+        }
+
+        return $data;
+    }
+
+    /**
+     * Get revenue metrics
+     *
+     * @since 1.0.0
+     * @param array $date_filter Date filter conditions
+     * @return array Revenue metrics
+     */
+    private function get_revenue_metrics($date_filter)
+    {
+        global $wpdb;
+
+        $data = array(
+            'total_revenue' => 0,
+            'revenue_by_gateway' => array(),
+            'revenue_by_source' => array(),
+            'average_transaction_value' => 0,
+            'revenue_growth' => 0
+        );
+
+        // Get total revenue
+        $data['total_revenue'] = (float) $wpdb->get_var($wpdb->prepare(
+            "SELECT SUM(revenue) FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        // Get revenue by gateway
+        $gateway_revenue = $wpdb->get_results($wpdb->prepare(
+            "SELECT gateway, SUM(revenue) as total_revenue, COUNT(*) as transaction_count
+             FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s
+             AND gateway != ''
+             GROUP BY gateway
+             ORDER BY total_revenue DESC",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        $data['revenue_by_gateway'] = $gateway_revenue;
+
+        // Get revenue by source
+        $source_revenue = $wpdb->get_results($wpdb->prepare(
+            "SELECT source_type, SUM(revenue) as total_revenue
+             FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s
+             GROUP BY source_type
+             ORDER BY total_revenue DESC",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        $data['revenue_by_source'] = $source_revenue;
+
+        // Calculate average transaction value
+        $transaction_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name}
+             WHERE metric_type = 'payment_completed'
+             AND metric_date BETWEEN %s AND %s",
+            $date_filter['start'],
+            $date_filter['end']
+        ));
+
+        if ($transaction_count > 0) {
+            $data['average_transaction_value'] = $data['total_revenue'] / $transaction_count;
+        }
+
+        return $data;
+    }
+
+    /**
+     * Check if component is active
+     *
+     * @since 1.0.0
+     * @return bool True if active, false otherwise
+     */
+    public function is_active()
+    {
+        return chatshop_is_premium();
+    }
+
+    /**
+     * Get component status for debugging
+     *
+     * @since 1.0.0
+     * @return array Component status information
+     */
+    public function get_status()
+    {
+        global $wpdb;
+
+        $status = array(
+            'component_id' => $this->id,
+            'name' => $this->name,
+            'version' => $this->version,
+            'is_active' => $this->is_active(),
+            'table_exists' => false,
+            'record_count' => 0
+        );
+
+        // Check if table exists
+        $table_exists = $wpdb->get_var($wpdb->prepare(
+            "SHOW TABLES LIKE %s",
+            $this->table_name
+        ));
+
+        if ($table_exists) {
+            $status['table_exists'] = true;
+            $status['record_count'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name}");
+        }
+
+        return $status;
     }
 }
