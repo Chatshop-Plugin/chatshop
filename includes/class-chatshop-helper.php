@@ -9,6 +9,9 @@
  * analytics tracking, data formatting, premium feature management,
  * and global helper functions for easy integration.
  *
+ * IMPORTANT: This class contains ONLY class methods. All global functions
+ * are declared in includes/chatshop-global-functions.php to prevent duplicates.
+ *
  * @package ChatShop
  * @subpackage Includes
  * @since 1.0.0
@@ -74,435 +77,75 @@ class ChatShop_Helper
             chatshop_log("Analytics event tracked: {$metric_type}.{$metric_name}", 'info', $data);
             return true;
         } else {
-            chatshop_log("Failed to track analytics event: {$metric_type}.{$metric_name}", 'error');
+            chatshop_log("Failed to track analytics event: {$metric_type}.{$metric_name}", 'error', array(
+                'data' => $data,
+                'db_error' => $wpdb->last_error
+            ));
             return false;
         }
     }
 
     /**
-     * Format currency value
+     * Format currency for display
      *
      * @since 1.0.0
      * @param float  $amount Amount to format
      * @param string $currency Currency code
-     * @return string Formatted currency string
+     * @return string Formatted currency
      */
     public static function format_currency($amount, $currency = 'NGN')
     {
-        $amount = floatval($amount);
+        $symbols = array(
+            'NGN' => '₦',
+            'USD' => '$',
+            'EUR' => '€',
+            'GBP' => '£',
+            'ZAR' => 'R',
+            'GHS' => '₵',
+            'KES' => 'KSh'
+        );
 
-        switch (strtoupper($currency)) {
-            case 'NGN':
-                return '₦' . number_format($amount, 0);
-            case 'USD':
-                return '$' . number_format($amount, 2);
-            case 'GHS':
-                return 'GH₵' . number_format($amount, 2);
-            case 'KES':
-                return 'KSh' . number_format($amount, 0);
-            case 'ZAR':
-                return 'R' . number_format($amount, 2);
-            default:
-                return strtoupper($currency) . ' ' . number_format($amount, 2);
-        }
+        $symbol = isset($symbols[$currency]) ? $symbols[$currency] : $currency;
+        return $symbol . number_format((float) $amount, 2);
     }
 
     /**
-     * Format number with thousand separators
+     * Format number with separators
      *
      * @since 1.0.0
      * @param mixed $number Number to format
+     * @param int   $decimals Number of decimal places
      * @return string Formatted number
      */
-    public static function format_number($number)
+    public static function format_number($number, $decimals = 0)
     {
-        return number_format(floatval($number));
+        return number_format((float) $number, $decimals);
     }
 
     /**
-     * Calculate percentage with proper rounding
+     * Format phone number for display
      *
      * @since 1.0.0
-     * @param float $part Part value
-     * @param float $total Total value
-     * @param int   $decimals Number of decimal places
-     * @return float Calculated percentage
+     * @param string $phone Phone number to format
+     * @return string Formatted phone number
      */
-    public static function calculate_percentage($part, $total, $decimals = 2)
+    public static function format_phone($phone)
     {
-        if ($total == 0) {
-            return 0;
-        }
+        $cleaned = preg_replace('/[^\d+]/', '', $phone);
 
-        return round(($part / $total) * 100, $decimals);
-    }
-
-    /**
-     * Get date range array for analytics queries
-     *
-     * @since 1.0.0
-     * @param string $range Range identifier (7days, 30days, 90days, 365days)
-     * @return array Date filter with start and end dates
-     */
-    public static function get_date_range($range)
-    {
-        $end_date = current_time('Y-m-d');
-
-        switch ($range) {
-            case '7days':
-                $start_date = date('Y-m-d', strtotime('-7 days'));
-                break;
-            case '30days':
-                $start_date = date('Y-m-d', strtotime('-30 days'));
-                break;
-            case '90days':
-                $start_date = date('Y-m-d', strtotime('-90 days'));
-                break;
-            case '365days':
-                $start_date = date('Y-m-d', strtotime('-365 days'));
-                break;
-            case 'this_month':
-                $start_date = date('Y-m-01');
-                break;
-            case 'last_month':
-                $start_date = date('Y-m-01', strtotime('first day of last month'));
-                $end_date = date('Y-m-t', strtotime('last day of last month'));
-                break;
-            default:
-                $start_date = date('Y-m-d', strtotime('-7 days'));
-        }
-
-        return array(
-            'start' => $start_date,
-            'end' => $end_date
-        );
-    }
-
-    /**
-     * Validate phone number format
-     *
-     * @since 1.0.0
-     * @param string $phone Phone number to validate
-     * @return string|false Formatted phone number or false if invalid
-     */
-    public static function validate_phone_number($phone)
-    {
-        // Remove all non-numeric characters
-        $phone = preg_replace('/[^0-9]/', '', $phone);
-
-        // Check if it's a valid Nigerian number
-        if (preg_match('/^(?:\+?234|0)?([789][01]\d{8})$/', $phone, $matches)) {
-            return '+234' . $matches[1];
-        }
-
-        // Check for international format
-        if (preg_match('/^\+?(\d{10,15})$/', $phone, $matches)) {
-            return '+' . $matches[1];
-        }
-
-        return false;
-    }
-
-    /**
-     * Sanitize contact data
-     *
-     * @since 1.0.0
-     * @param array $data Raw contact data
-     * @return array Sanitized contact data
-     */
-    public static function sanitize_contact_data($data)
-    {
-        return array(
-            'phone' => self::validate_phone_number($data['phone'] ?? ''),
-            'name' => sanitize_text_field($data['name'] ?? ''),
-            'email' => sanitize_email($data['email'] ?? ''),
-            'tags' => sanitize_text_field($data['tags'] ?? ''),
-            'notes' => sanitize_textarea_field($data['notes'] ?? ''),
-            'status' => in_array($data['status'] ?? 'active', array('active', 'inactive', 'blocked'))
-                ? $data['status'] : 'active',
-            'opt_in_status' => in_array($data['opt_in_status'] ?? 'pending', array('opted_in', 'opted_out', 'pending'))
-                ? $data['opt_in_status'] : 'pending'
-        );
-    }
-
-    /**
-     * Generate unique transaction reference
-     *
-     * @since 1.0.0
-     * @param string $prefix Optional prefix
-     * @return string Transaction reference
-     */
-    public static function generate_transaction_reference($prefix = 'CS')
-    {
-        return $prefix . '_' . time() . '_' . wp_generate_password(8, false);
-    }
-
-    /**
-     * Check if analytics feature is enabled
-     *
-     * @since 1.0.0
-     * @return bool Whether analytics is enabled
-     */
-    public static function is_analytics_enabled()
-    {
-        return chatshop_is_premium_feature_available('analytics') ||
-            chatshop_is_premium_feature_available('advanced_analytics');
-    }
-
-    /**
-     * Get premium features list
-     *
-     * @since 1.0.0
-     * @return array Available premium features
-     */
-    public static function get_premium_features()
-    {
-        return array(
-            'unlimited_contacts' => array(
-                'name' => __('Unlimited Contacts', 'chatshop'),
-                'description' => __('Add unlimited contacts to your WhatsApp marketing campaigns', 'chatshop')
-            ),
-            'contact_import_export' => array(
-                'name' => __('Contact Import/Export', 'chatshop'),
-                'description' => __('Import contacts from CSV/Excel files and export for backup', 'chatshop')
-            ),
-            'bulk_messaging' => array(
-                'name' => __('Bulk Messaging', 'chatshop'),
-                'description' => __('Send messages to multiple contacts simultaneously', 'chatshop')
-            ),
-            'analytics' => array(
-                'name' => __('Analytics Dashboard', 'chatshop'),
-                'description' => __('Advanced analytics with conversion tracking and revenue attribution', 'chatshop')
-            ),
-            'advanced_analytics' => array(
-                'name' => __('Advanced Analytics', 'chatshop'),
-                'description' => __('Detailed analytics with custom reporting and data export', 'chatshop')
-            ),
-            'multiple_gateways' => array(
-                'name' => __('Multiple Payment Gateways', 'chatshop'),
-                'description' => __('Support for multiple payment providers beyond Paystack', 'chatshop')
-            ),
-            'campaign_automation' => array(
-                'name' => __('Campaign Automation', 'chatshop'),
-                'description' => __('Automated WhatsApp marketing campaigns with scheduling', 'chatshop')
-            )
-        );
-    }
-
-    /**
-     * Get analytics metrics configuration
-     *
-     * @since 1.0.0
-     * @return array Metrics configuration
-     */
-    public static function get_analytics_metrics_config()
-    {
-        return array(
-            'interaction' => array(
-                'message_sent' => __('Message Sent', 'chatshop'),
-                'message_opened' => __('Message Opened', 'chatshop'),
-                'message_replied' => __('Message Replied', 'chatshop'),
-                'link_clicked' => __('Link Clicked', 'chatshop'),
-                'contact_added' => __('Contact Added', 'chatshop'),
-                'contact_updated' => __('Contact Updated', 'chatshop')
-            ),
-            'payment' => array(
-                'payment_initiated' => __('Payment Initiated', 'chatshop'),
-                'payment_completed' => __('Payment Completed', 'chatshop'),
-                'payment_failed' => __('Payment Failed', 'chatshop'),
-                'payment_cancelled' => __('Payment Cancelled', 'chatshop'),
-                'refund_processed' => __('Refund Processed', 'chatshop')
-            ),
-            'conversion' => array(
-                'whatsapp_to_payment' => __('WhatsApp to Payment', 'chatshop'),
-                'contact_to_customer' => __('Contact to Customer', 'chatshop'),
-                'campaign_conversion' => __('Campaign Conversion', 'chatshop')
-            )
-        );
-    }
-
-    /**
-     * Export analytics data to CSV
-     *
-     * @since 1.0.0
-     * @param array  $data Analytics data
-     * @param string $filename Optional filename
-     * @return array Export result with content and filename
-     */
-    public static function export_analytics_to_csv($data, $filename = null)
-    {
-        if (!$filename) {
-            $filename = 'chatshop-analytics-' . date('Y-m-d-H-i-s') . '.csv';
-        }
-
-        $csv_content = '';
-
-        if (!empty($data)) {
-            // Get headers from first row
-            $headers = array_keys($data[0]);
-            $csv_content .= implode(',', array_map(array(self::class, 'escape_csv_field'), $headers)) . "\n";
-
-            // Add data rows
-            foreach ($data as $row) {
-                $csv_content .= implode(',', array_map(array(self::class, 'escape_csv_field'), array_values($row))) . "\n";
+        // Nigerian format: +234 xxx xxx xxxx
+        if (strpos($cleaned, '+234') === 0) {
+            $number = substr($cleaned, 4);
+            if (strlen($number) === 10) {
+                return '+234 ' . substr($number, 0, 3) . ' ' . substr($number, 3, 3) . ' ' . substr($number, 6);
             }
         }
 
-        return array(
-            'content' => $csv_content,
-            'filename' => $filename,
-            'mime_type' => 'text/csv'
-        );
+        return $cleaned;
     }
 
     /**
-     * Escape CSV field
-     *
-     * @since 1.0.0
-     * @param string $field Field value
-     * @return string Escaped field
-     */
-    private static function escape_csv_field($field)
-    {
-        if (strpos($field, ',') !== false || strpos($field, '"') !== false || strpos($field, "\n") !== false) {
-            return '"' . str_replace('"', '""', $field) . '"';
-        }
-        return $field;
-    }
-
-    /**
-     * Clean old analytics data
-     *
-     * @since 1.0.0
-     * @param int $days_to_keep Number of days to keep data
-     * @return int Number of records deleted
-     */
-    public static function clean_old_analytics_data($days_to_keep = 730)
-    {
-        global $wpdb;
-
-        $analytics = chatshop_get_component('analytics');
-        if (!$analytics) {
-            return 0;
-        }
-
-        $table_name = $analytics->get_table_name();
-        $cutoff_date = date('Y-m-d', strtotime("-{$days_to_keep} days"));
-
-        $deleted = $wpdb->query($wpdb->prepare(
-            "DELETE FROM {$table_name} WHERE metric_date < %s",
-            $cutoff_date
-        ));
-
-        if ($deleted) {
-            chatshop_log("Cleaned up {$deleted} old analytics records older than {$cutoff_date}", 'info');
-        }
-
-        return intval($deleted);
-    }
-
-    /**
-     * Get gateway colors for charts
-     *
-     * @since 1.0.0
-     * @return array Gateway colors mapping
-     */
-    public static function get_gateway_colors()
-    {
-        return array(
-            'paystack' => '#1B5E20',
-            'paypal' => '#003087',
-            'flutterwave' => '#F5A623',
-            'razorpay' => '#528FF0',
-            'stripe' => '#6772E5',
-            'default' => '#666666'
-        );
-    }
-
-    /**
-     * Get source type colors for charts
-     *
-     * @since 1.0.0
-     * @return array Source type colors mapping
-     */
-    public static function get_source_colors()
-    {
-        return array(
-            'whatsapp' => '#25D366',
-            'website' => '#135e96',
-            'email' => '#EA4335',
-            'sms' => '#FF9800',
-            'direct' => '#9C27B0',
-            'other' => '#757575'
-        );
-    }
-
-    /**
-     * Format analytics period label
-     *
-     * @since 1.0.0
-     * @param string $period Period identifier
-     * @return string Formatted period label
-     */
-    public static function format_period_label($period)
-    {
-        switch ($period) {
-            case '7days':
-                return __('Last 7 Days', 'chatshop');
-            case '30days':
-                return __('Last 30 Days', 'chatshop');
-            case '90days':
-                return __('Last 90 Days', 'chatshop');
-            case '365days':
-                return __('Last Year', 'chatshop');
-            case 'this_month':
-                return __('This Month', 'chatshop');
-            case 'last_month':
-                return __('Last Month', 'chatshop');
-            default:
-                return __('Custom Period', 'chatshop');
-        }
-    }
-
-    /**
-     * Get conversion rate status class
-     *
-     * @since 1.0.0
-     * @param float $rate Conversion rate percentage
-     * @return string CSS class for styling
-     */
-    public static function get_conversion_rate_class($rate)
-    {
-        if ($rate >= 10) {
-            return 'excellent';
-        } elseif ($rate >= 5) {
-            return 'good';
-        } elseif ($rate >= 2) {
-            return 'average';
-        } else {
-            return 'poor';
-        }
-    }
-
-    /**
-     * Calculate growth rate between two values
-     *
-     * @since 1.0.0
-     * @param float $current Current value
-     * @param float $previous Previous value
-     * @return float Growth rate percentage
-     */
-    public static function calculate_growth_rate($current, $previous)
-    {
-        if ($previous == 0) {
-            return $current > 0 ? 100 : 0;
-        }
-
-        return round((($current - $previous) / $previous) * 100, 2);
-    }
-
-    /**
-     * Get analytics dashboard URL
+     * Get analytics URL
      *
      * @since 1.0.0
      * @return string Analytics dashboard URL
@@ -520,73 +163,89 @@ class ChatShop_Helper
      */
     public static function can_view_analytics()
     {
-        return current_user_can('manage_options') && self::is_analytics_enabled();
+        return current_user_can('manage_options') && chatshop_is_analytics_enabled();
     }
 
     /**
-     * Get formatted time period for display
+     * Get payment gateway display name
+     *
+     * @since 1.0.0
+     * @param string $gateway_id Gateway identifier
+     * @return string Gateway display name
+     */
+    public static function get_gateway_display_name($gateway_id)
+    {
+        $gateways = array(
+            'paystack' => __('Paystack', 'chatshop'),
+            'paypal' => __('PayPal', 'chatshop'),
+            'flutterwave' => __('Flutterwave', 'chatshop'),
+            'razorpay' => __('Razorpay', 'chatshop')
+        );
+
+        return isset($gateways[$gateway_id]) ? $gateways[$gateway_id] : ucfirst($gateway_id);
+    }
+
+    /**
+     * Get contact source display name
+     *
+     * @since 1.0.0
+     * @param string $source_type Source type
+     * @return string Source display name
+     */
+    public static function get_source_display_name($source_type)
+    {
+        $sources = array(
+            'whatsapp' => __('WhatsApp', 'chatshop'),
+            'manual' => __('Manual Entry', 'chatshop'),
+            'import' => __('Import', 'chatshop'),
+            'woocommerce' => __('WooCommerce', 'chatshop'),
+            'form' => __('Contact Form', 'chatshop')
+        );
+
+        return isset($sources[$source_type]) ? $sources[$source_type] : ucfirst($source_type);
+    }
+
+    /**
+     * Get time period display name
+     *
+     * @since 1.0.0
+     * @param string $period Period identifier
+     * @return string Period display name
+     */
+    public static function get_period_display_name($period)
+    {
+        $periods = array(
+            '7days' => __('Last 7 Days', 'chatshop'),
+            '30days' => __('Last 30 Days', 'chatshop'),
+            '90days' => __('Last 90 Days', 'chatshop'),
+            '365days' => __('Last 365 Days', 'chatshop'),
+            'this_month' => __('This Month', 'chatshop'),
+            'last_month' => __('Last Month', 'chatshop'),
+            'this_year' => __('This Year', 'chatshop'),
+            'last_year' => __('Last Year', 'chatshop')
+        );
+
+        return isset($periods[$period]) ? $periods[$period] : ucfirst($period);
+    }
+
+    /**
+     * Validate date range for analytics
      *
      * @since 1.0.0
      * @param string $start_date Start date (Y-m-d format)
      * @param string $end_date End date (Y-m-d format)
-     * @return string Formatted time period
-     */
-    public static function format_date_period($start_date, $end_date)
-    {
-        $start = date_create($start_date);
-        $end = date_create($end_date);
-
-        if (!$start || !$end) {
-            return '';
-        }
-
-        $start_formatted = date_format($start, 'M j, Y');
-        $end_formatted = date_format($end, 'M j, Y');
-
-        if ($start_date === $end_date) {
-            return $start_formatted;
-        }
-
-        return $start_formatted . ' - ' . $end_formatted;
-    }
-
-    /**
-     * Get default analytics settings
-     *
-     * @since 1.0.0
-     * @return array Default analytics settings
-     */
-    public static function get_default_analytics_settings()
-    {
-        return array(
-            'tracking_enabled' => true,
-            'data_retention_days' => 730,
-            'auto_cleanup' => true,
-            'export_format' => 'csv',
-            'dashboard_refresh_interval' => 300, // 5 minutes
-            'conversion_attribution_window' => 7, // days
-            'revenue_currency' => 'NGN'
-        );
-    }
-
-    /**
-     * Validate analytics date range
-     *
-     * @since 1.0.0
-     * @param string $start_date Start date
-     * @param string $end_date End date
      * @return array Validation result
      */
     public static function validate_date_range($start_date, $end_date)
     {
-        $start = date_create($start_date);
-        $end = date_create($end_date);
-        $now = date_create(current_time('Y-m-d'));
+        $start = DateTime::createFromFormat('Y-m-d', $start_date);
+        $end = DateTime::createFromFormat('Y-m-d', $end_date);
+        $now = new DateTime();
 
         if (!$start || !$end) {
             return array(
                 'valid' => false,
-                'message' => __('Invalid date format.', 'chatshop')
+                'message' => __('Invalid date format. Please use YYYY-MM-DD format.', 'chatshop')
             );
         }
 
@@ -671,316 +330,299 @@ class ChatShop_Helper
 
         return true;
     }
-}
 
-// ================================
-// GLOBAL HELPER FUNCTIONS
-// ================================
+    /**
+     * Generate secure payment link
+     *
+     * @since 1.0.0
+     * @param array $payment_data Payment data
+     * @return string Payment link
+     */
+    public static function generate_payment_link($payment_data)
+    {
+        $link_id = wp_generate_password(12, false);
 
-/**
- * Check if analytics is enabled and available
- *
- * @since 1.0.0
- * @return bool Whether analytics is available
- */
-function chatshop_is_analytics_enabled()
-{
-    return chatshop_is_premium_feature_available('analytics') ||
-        chatshop_is_premium_feature_available('advanced_analytics');
-}
+        // Store payment link data
+        $link_data = array(
+            'link_id' => $link_id,
+            'amount' => $payment_data['amount'],
+            'currency' => $payment_data['currency'] ?? 'NGN',
+            'description' => $payment_data['description'] ?? '',
+            'contact_id' => $payment_data['contact_id'] ?? null,
+            'expires_at' => date('Y-m-d H:i:s', strtotime('+24 hours'))
+        );
 
-/**
- * Track analytics event - Global function for easy integration
- *
- * @since 1.0.0
- * @param string $metric_type Type of metric (interaction, payment, conversion)
- * @param string $metric_name Specific metric name
- * @param mixed  $metric_value Metric value (default: 1)
- * @param array  $meta Additional metadata
- * @return bool Success status
- */
-function chatshop_track_analytics($metric_type, $metric_name, $metric_value = 1, $meta = array())
-{
-    // Check if analytics is enabled
-    if (!chatshop_is_analytics_enabled()) {
-        return false;
+        // Save to database
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'chatshop_payment_links';
+        $wpdb->insert($table_name, $link_data);
+
+        // Generate URL
+        return add_query_arg(array(
+            'chatshop_payment' => $link_id
+        ), home_url('/'));
     }
 
-    return ChatShop_Helper::track_analytics_event($metric_type, $metric_name, $metric_value, $meta);
-}
+    /**
+     * Sanitize contact data
+     *
+     * @since 1.0.0
+     * @param array $contact_data Raw contact data
+     * @return array Sanitized contact data
+     */
+    public static function sanitize_contact_data($contact_data)
+    {
+        $sanitized = array();
 
-/**
- * Track payment conversion - Integration with existing payment system
- *
- * @since 1.0.0
- * @param array  $payment_data Payment data from existing system
- * @param string $gateway Gateway identifier
- * @return bool Success status
- */
-function chatshop_track_payment_conversion($payment_data, $gateway)
-{
-    if (!chatshop_is_analytics_enabled()) {
-        return false;
+        // Required fields
+        if (isset($contact_data['phone'])) {
+            $sanitized['phone'] = chatshop_validate_phone($contact_data['phone']);
+        }
+
+        if (isset($contact_data['name'])) {
+            $sanitized['name'] = sanitize_text_field($contact_data['name']);
+        }
+
+        // Optional fields
+        if (isset($contact_data['email'])) {
+            $sanitized['email'] = sanitize_email($contact_data['email']);
+        }
+
+        if (isset($contact_data['tags'])) {
+            $sanitized['tags'] = sanitize_text_field($contact_data['tags']);
+        }
+
+        if (isset($contact_data['notes'])) {
+            $sanitized['notes'] = sanitize_textarea_field($contact_data['notes']);
+        }
+
+        if (isset($contact_data['status'])) {
+            $allowed_statuses = array('active', 'inactive', 'blocked');
+            $sanitized['status'] = in_array($contact_data['status'], $allowed_statuses) ?
+                $contact_data['status'] : 'active';
+        }
+
+        if (isset($contact_data['opt_in_status'])) {
+            $allowed_opt_statuses = array('opted_in', 'opted_out', 'pending');
+            $sanitized['opt_in_status'] = in_array($contact_data['opt_in_status'], $allowed_opt_statuses) ?
+                $contact_data['opt_in_status'] : 'pending';
+        }
+
+        return $sanitized;
     }
 
-    // Prepare meta data
-    $meta = array(
-        'source_type' => 'whatsapp',
-        'contact_id' => $payment_data['contact_id'] ?? null,
-        'payment_id' => $payment_data['reference'] ?? '',
-        'gateway' => $gateway,
-        'revenue' => isset($payment_data['amount']) ? ($payment_data['amount'] / 100) : 0, // Convert from kobo
-        'currency' => $payment_data['currency'] ?? 'NGN'
-    );
+    /**
+     * Get contact statistics
+     *
+     * @since 1.0.0
+     * @return array Contact statistics
+     */
+    public static function get_contact_stats()
+    {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'chatshop_contacts';
 
-    // Track payment completion
-    chatshop_track_analytics('payment', 'payment_completed', 1, $meta);
+        $stats = array(
+            'total' => 0,
+            'active' => 0,
+            'opted_in' => 0,
+            'recent' => 0
+        );
 
-    // Track conversion
-    chatshop_track_analytics('conversion', 'whatsapp_to_payment', 1, $meta);
+        // Get total contacts
+        $stats['total'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_name}");
 
-    return true;
-}
+        // Get active contacts
+        $stats['active'] = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$table_name} WHERE status = 'active'"
+        );
 
-/**
- * Track contact interaction - Integration with existing contact system
- *
- * @since 1.0.0
- * @param int    $contact_id Contact ID
- * @param string $interaction_type Type of interaction
- * @param array  $meta Additional metadata
- * @return bool Success status
- */
-function chatshop_track_contact_interaction($contact_id, $interaction_type, $meta = array())
-{
-    if (!chatshop_is_analytics_enabled()) {
-        return false;
+        // Get opted-in contacts
+        $stats['opted_in'] = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$table_name} WHERE opt_in_status = 'opted_in'"
+        );
+
+        // Get contacts added in last 30 days
+        $stats['recent'] = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$table_name} WHERE created_at >= %s",
+                date('Y-m-d H:i:s', strtotime('-30 days'))
+            )
+        );
+
+        return $stats;
     }
 
-    // Prepare meta data
-    $meta['contact_id'] = $contact_id;
-    $meta['source_type'] = $meta['source_type'] ?? 'whatsapp';
+    /**
+     * Export contacts to CSV
+     *
+     * @since 1.0.0
+     * @param array $filters Export filters
+     * @return string|false CSV content or false on error
+     */
+    public static function export_contacts_csv($filters = array())
+    {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'chatshop_contacts';
 
-    return chatshop_track_analytics('interaction', $interaction_type, 1, $meta);
-}
+        // Build query with filters
+        $where_clauses = array('1=1');
+        $params = array();
 
-/**
- * Format currency for display - Compatibility with existing system
- *
- * @since 1.0.0
- * @param float  $amount Amount to format
- * @param string $currency Currency code
- * @return string Formatted currency
- */
-function chatshop_format_currency($amount, $currency = 'NGN')
-{
-    return ChatShop_Helper::format_currency($amount, $currency);
-}
+        if (!empty($filters['status'])) {
+            $where_clauses[] = 'status = %s';
+            $params[] = $filters['status'];
+        }
 
-/**
- * Format number with separators - Compatibility function
- *
- * @since 1.0.0
- * @param mixed $number Number to format
- * @return string Formatted number
- */
-function chatshop_format_number($number)
-{
-    return ChatShop_Helper::format_number($number);
-}
+        if (!empty($filters['opt_in_status'])) {
+            $where_clauses[] = 'opt_in_status = %s';
+            $params[] = $filters['opt_in_status'];
+        }
 
-/**
- * Get analytics dashboard URL
- *
- * @since 1.0.0
- * @return string Analytics dashboard URL
- */
-function chatshop_get_analytics_url()
-{
-    return ChatShop_Helper::get_analytics_url();
-}
+        if (!empty($filters['date_from'])) {
+            $where_clauses[] = 'DATE(created_at) >= %s';
+            $params[] = $filters['date_from'];
+        }
 
-/**
- * Check if current user can view analytics
- *
- * @since 1.0.0
- * @return bool Whether user can view analytics
- */
-function chatshop_can_user_view_analytics()
-{
-    return ChatShop_Helper::can_view_analytics();
-}
+        if (!empty($filters['date_to'])) {
+            $where_clauses[] = 'DATE(created_at) <= %s';
+            $params[] = $filters['date_to'];
+        }
 
-// ================================
-// INTEGRATION HOOKS
-// ================================
+        $where_clause = implode(' AND ', $where_clauses);
+        $query = "SELECT * FROM {$table_name} WHERE {$where_clause} ORDER BY created_at DESC";
 
-// Hook into existing payment completion action
-add_action('chatshop_payment_completed', 'chatshop_track_payment_conversion', 10, 2);
+        if (!empty($params)) {
+            $query = $wpdb->prepare($query, $params);
+        }
 
-// Hook into existing contact interaction action
-add_action('chatshop_contact_interaction', 'chatshop_track_contact_interaction', 10, 3);
+        $contacts = $wpdb->get_results($query, ARRAY_A);
 
-// Hook to clear analytics cache when settings change
-add_action('update_option_chatshop_premium_features', function () {
-    ChatShop_Helper::clear_analytics_cache();
-});
+        if (empty($contacts)) {
+            return false;
+        }
 
-// Hook for admin enqueue scripts - analytics assets
-add_action('admin_enqueue_scripts', function ($hook_suffix) {
-    // Only load on analytics page
-    if ($hook_suffix !== 'chatshop_page_chatshop-analytics') {
-        return;
+        // Generate CSV
+        $csv_output = '';
+        $headers = array(
+            'ID',
+            'Name',
+            'Phone',
+            'Email',
+            'Status',
+            'Opt-in Status',
+            'Tags',
+            'Notes',
+            'Created Date',
+            'Last Contacted'
+        );
+
+        $csv_output .= implode(',', $headers) . "\n";
+
+        foreach ($contacts as $contact) {
+            $row = array(
+                $contact['id'],
+                '"' . str_replace('"', '""', $contact['name']) . '"',
+                $contact['phone'],
+                $contact['email'],
+                $contact['status'],
+                $contact['opt_in_status'],
+                '"' . str_replace('"', '""', $contact['tags']) . '"',
+                '"' . str_replace('"', '""', $contact['notes']) . '"',
+                $contact['created_at'],
+                $contact['last_contacted'] ?? ''
+            );
+
+            $csv_output .= implode(',', $row) . "\n";
+        }
+
+        return $csv_output;
     }
 
-    // Verify analytics component is available
-    $analytics = chatshop_get_component('analytics');
-    if (!$analytics) {
-        return;
-    }
+    /**
+     * Import contacts from CSV
+     *
+     * @since 1.0.0
+     * @param string $csv_content CSV content
+     * @return array Import result
+     */
+    public static function import_contacts_csv($csv_content)
+    {
+        $lines = explode("\n", $csv_content);
+        $headers = str_getcsv(array_shift($lines));
 
-    // Add analytics-specific localization
-    wp_localize_script('chatshop-admin', 'chatshop_analytics', array(
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce' => wp_create_nonce('chatshop_admin_nonce'),
-        'is_premium' => chatshop_is_analytics_enabled(),
-        'upgrade_url' => admin_url('admin.php?page=chatshop-premium'),
-        'strings' => array(
-            'loading_analytics' => __('Loading analytics data...', 'chatshop'),
-            'export_starting' => __('Starting export...', 'chatshop'),
-            'export_complete' => __('Export completed successfully.', 'chatshop'),
-            'error_loading' => __('Error loading analytics data.', 'chatshop'),
-            'no_data_period' => __('No data available for this period.', 'chatshop'),
-            'retry_action' => __('Retry', 'chatshop'),
-            'premium_required' => __('Premium access required for this feature.', 'chatshop')
-        )
-    ));
-});
+        $imported = 0;
+        $skipped = 0;
+        $errors = array();
 
-// Hook for analytics menu styling
-add_action('admin_head', function () {
-    if (strpos(get_current_screen()->id, 'chatshop') !== false) {
-?>
-        <style>
-            .chatshop-premium-badge {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white !important;
-                font-size: 9px;
-                padding: 2px 6px;
-                border-radius: 10px;
-                margin-left: 5px;
-                font-weight: bold;
-                text-shadow: none;
-                display: inline-block;
-                vertical-align: top;
-                line-height: 1.2;
+        foreach ($lines as $line_num => $line) {
+            if (empty(trim($line))) continue;
+
+            $data = str_getcsv($line);
+
+            if (count($data) !== count($headers)) {
+                $errors[] = sprintf(__('Line %d: Invalid number of columns', 'chatshop'), $line_num + 2);
+                $skipped++;
+                continue;
             }
-        </style>
-    <?php
-    }
-});
 
-// Hook for export functionality
-add_action('wp_ajax_chatshop_export_analytics', function () {
-    // Verify this is properly handled by the analytics component
-    $analytics = chatshop_get_component('analytics');
-    if (!$analytics) {
-        wp_send_json_error(array(
-            'message' => __('Analytics component not available.', 'chatshop')
-        ));
-    }
+            $contact_data = array_combine($headers, $data);
 
-    // Check if export handler exists
-    $export_class = 'ChatShop\ChatShop_Analytics_Export';
-    if (class_exists($export_class)) {
-        $exporter = new $export_class($analytics);
-        $exporter->handle_export_request();
-    } else {
-        wp_send_json_error(array(
-            'message' => __('Export functionality not available.', 'chatshop')
-        ));
-    }
-});
+            // Validate required fields
+            if (empty($contact_data['Name']) || empty($contact_data['Phone'])) {
+                $errors[] = sprintf(__('Line %d: Missing required fields (Name, Phone)', 'chatshop'), $line_num + 2);
+                $skipped++;
+                continue;
+            }
 
-// Hook for dashboard widget integration
-add_action('wp_dashboard_setup', function () {
-    if (chatshop_is_analytics_enabled() && current_user_can('manage_options')) {
-        wp_add_dashboard_widget(
-            'chatshop_analytics_summary',
-            __('ChatShop Analytics Summary', 'chatshop'),
-            'chatshop_render_analytics_dashboard_widget'
+            // Sanitize and prepare data
+            $sanitized_data = array(
+                'name' => sanitize_text_field($contact_data['Name']),
+                'phone' => chatshop_validate_phone($contact_data['Phone']),
+                'email' => sanitize_email($contact_data['Email'] ?? ''),
+                'tags' => sanitize_text_field($contact_data['Tags'] ?? ''),
+                'notes' => sanitize_textarea_field($contact_data['Notes'] ?? ''),
+                'status' => 'active',
+                'opt_in_status' => 'pending'
+            );
+
+            if (!$sanitized_data['phone']) {
+                $errors[] = sprintf(__('Line %d: Invalid phone number format', 'chatshop'), $line_num + 2);
+                $skipped++;
+                continue;
+            }
+
+            // Check if contact already exists
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'chatshop_contacts';
+            $existing = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM {$table_name} WHERE phone = %s",
+                $sanitized_data['phone']
+            ));
+
+            if ($existing) {
+                $skipped++;
+                continue;
+            }
+
+            // Insert contact
+            $result = $wpdb->insert($table_name, array_merge($sanitized_data, array(
+                'created_by' => get_current_user_id(),
+                'created_at' => current_time('mysql')
+            )));
+
+            if ($result) {
+                $imported++;
+            } else {
+                $errors[] = sprintf(__('Line %d: Database error', 'chatshop'), $line_num + 2);
+                $skipped++;
+            }
+        }
+
+        return array(
+            'imported' => $imported,
+            'skipped' => $skipped,
+            'errors' => $errors
         );
     }
-});
-
-/**
- * Render analytics dashboard widget
- *
- * @since 1.0.0
- */
-function chatshop_render_analytics_dashboard_widget()
-{
-    $analytics = chatshop_get_component('analytics');
-    if (!$analytics) {
-        echo '<p>' . __('Analytics data unavailable.', 'chatshop') . '</p>';
-        return;
-    }
-
-    // Get quick stats for the widget
-    $overview_data = $analytics->get_analytics_data('7days', 'overview');
-
-    ?>
-    <div class="chatshop-dashboard-widget">
-        <div class="chatshop-widget-stats">
-            <div class="stat-item">
-                <span class="stat-label"><?php _e('7-Day Revenue', 'chatshop'); ?>:</span>
-                <span class="stat-value"><?php echo chatshop_format_currency($overview_data['totals']['revenue'] ?? 0); ?></span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label"><?php _e('Conversions', 'chatshop'); ?>:</span>
-                <span class="stat-value"><?php echo chatshop_format_number($overview_data['totals']['conversions'] ?? 0); ?></span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label"><?php _e('Conversion Rate', 'chatshop'); ?>:</span>
-                <span class="stat-value"><?php echo ($overview_data['conversion_rate'] ?? 0) . '%'; ?></span>
-            </div>
-        </div>
-        <p class="chatshop-widget-link">
-            <a href="<?php echo chatshop_get_analytics_url(); ?>" class="button button-primary">
-                <?php _e('View Full Analytics', 'chatshop'); ?>
-            </a>
-        </p>
-    </div>
-
-    <style>
-        .chatshop-dashboard-widget .chatshop-widget-stats {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-
-        .chatshop-dashboard-widget .stat-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #f0f0f1;
-        }
-
-        .chatshop-dashboard-widget .stat-label {
-            font-weight: 600;
-            color: #1d2327;
-        }
-
-        .chatshop-dashboard-widget .stat-value {
-            font-weight: bold;
-            color: #135e96;
-        }
-
-        .chatshop-widget-link {
-            text-align: center;
-            margin: 0;
-        }
-    </style>
-<?php
 }

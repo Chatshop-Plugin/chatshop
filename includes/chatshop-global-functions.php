@@ -5,10 +5,10 @@
  *
  * File: includes/chatshop-global-functions.php
  * 
- * Contains essential helper functions that are used throughout the plugin.
+ * Contains ALL essential helper functions that are used throughout the plugin.
  * These functions need to be available before classes are loaded.
  * 
- * IMPORTANT: Only contains functions NOT declared elsewhere to prevent duplicates.
+ * IMPORTANT: This is the SINGLE source for all global functions to prevent duplicates.
  *
  * @package ChatShop
  * @subpackage Includes
@@ -20,6 +20,88 @@ namespace ChatShop;
 // Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
+}
+
+// ================================
+// CORE PLUGIN FUNCTIONS (Essential)
+// ================================
+
+/**
+ * Get ChatShop instance
+ *
+ * @since 1.0.0
+ * @return ChatShop Main instance
+ */
+function chatshop()
+{
+    return ChatShop::instance();
+}
+
+/**
+ * Log message using ChatShop logger
+ * This is the ONLY declaration of this function in the entire plugin
+ *
+ * @since 1.0.0
+ * @param string $message Log message
+ * @param string $level Log level
+ * @param array  $context Additional context
+ */
+function chatshop_log($message, $level = 'info', $context = array())
+{
+    if (class_exists('ChatShop\ChatShop_Logger')) {
+        ChatShop_Logger::log($message, $level, $context);
+    } else {
+        // Fallback to error_log if logger class is not available
+        error_log("[ChatShop] {$message}");
+    }
+}
+
+/**
+ * Check if user has premium access
+ *
+ * @since 1.0.0
+ * @return bool Whether user has premium access
+ */
+function chatshop_is_premium()
+{
+    return chatshop()->is_premium_feature_available('analytics') ||
+        chatshop()->is_premium_feature_available('advanced_analytics');
+}
+
+/**
+ * Check if specific premium feature is available
+ *
+ * @since 1.0.0
+ * @param string $feature Feature name
+ * @return bool Whether feature is available
+ */
+function chatshop_is_premium_feature_available($feature)
+{
+    return chatshop()->is_premium_feature_available($feature);
+}
+
+/**
+ * Get component instance
+ *
+ * @since 1.0.0
+ * @param string $component_id Component ID
+ * @return object|null Component instance
+ */
+function chatshop_get_component($component_id)
+{
+    $component_loader = chatshop()->get_component_loader();
+    return $component_loader ? $component_loader->get_component_instance($component_id) : null;
+}
+
+/**
+ * Check if analytics is enabled
+ *
+ * @since 1.0.0
+ * @return bool Analytics enabled status
+ */
+function chatshop_is_analytics_enabled()
+{
+    return chatshop_is_premium() && chatshop_is_enabled();
 }
 
 // ================================
@@ -398,6 +480,7 @@ function chatshop_array_has_keys($array, $required_keys)
 
 /**
  * Check if plugin is enabled
+ * SINGLE DECLARATION - Previously declared in chatshop.php (REMOVED)
  *
  * @since 1.0.0
  * @return bool Plugin enabled status
@@ -476,77 +559,268 @@ function chatshop_get_default_currency()
 function chatshop_get_error_message($error_code)
 {
     $messages = array(
-        'invalid_nonce'       => __('Security check failed. Please try again.', 'chatshop'),
+        'invalid_nonce'           => __('Security check failed. Please try again.', 'chatshop'),
         'insufficient_permissions' => __('You do not have permission to perform this action.', 'chatshop'),
-        'invalid_data'        => __('Invalid data provided. Please check your input.', 'chatshop'),
-        'payment_failed'      => __('Payment processing failed. Please try again.', 'chatshop'),
-        'gateway_error'       => __('Payment gateway error. Please try again later.', 'chatshop'),
-        'network_error'       => __('Network error. Please check your connection.', 'chatshop'),
-        'api_error'          => __('API communication error. Please try again.', 'chatshop'),
-        'file_upload_error'   => __('File upload failed. Please try again.', 'chatshop'),
-        'database_error'      => __('Database error occurred. Please contact support.', 'chatshop'),
-        'feature_not_available' => __('This feature is not available in your current plan.', 'chatshop')
+        'invalid_data'            => __('Invalid data provided. Please check your input.', 'chatshop'),
+        'payment_failed'          => __('Payment processing failed. Please try again.', 'chatshop'),
+        'gateway_error'           => __('Payment gateway error. Please try again later.', 'chatshop'),
+        'network_error'           => __('Network error. Please check your connection.', 'chatshop'),
+        'api_error'               => __('API communication error. Please try again.', 'chatshop'),
+        'file_upload_error'       => __('File upload failed. Please try again.', 'chatshop'),
+        'database_error'          => __('Database error occurred. Please contact support.', 'chatshop'),
+        'feature_not_available'   => __('This feature is not available in your current plan.', 'chatshop')
     );
 
     return isset($messages[$error_code]) ? $messages[$error_code] : __('An unknown error occurred.', 'chatshop');
 }
 
 /**
- * Log and display admin notice
+ * Handle and log errors
  *
  * @since 1.0.0
- * @param string $message Notice message
- * @param string $type Notice type (success, error, warning, info)
- * @param bool   $dismissible Whether notice is dismissible
+ * @param string $error_code Error code
+ * @param string $context Context information
+ * @param array  $data Additional error data
+ * @return array Error response
  */
-function chatshop_admin_notice($message, $type = 'info', $dismissible = true)
+function chatshop_handle_error($error_code, $context = '', $data = array())
 {
-    $class = "notice notice-{$type}";
+    $message = chatshop_get_error_message($error_code);
 
-    if ($dismissible) {
-        $class .= ' is-dismissible';
-    }
+    // Log the error
+    chatshop_log("Error [{$error_code}]: {$message} - Context: {$context}", 'error', $data);
 
-    add_action('admin_notices', function () use ($message, $class) {
-        echo '<div class="' . esc_attr($class) . '"><p>' . esc_html($message) . '</p></div>';
-    });
-
-    // Also log the message
-    if (function_exists('chatshop_log')) {
-        chatshop_log("Admin notice ({$type}): {$message}", $type === 'error' ? 'error' : 'info');
-    }
+    return array(
+        'success' => false,
+        'error_code' => $error_code,
+        'message' => $message,
+        'data' => $data
+    );
 }
 
 // ================================
-// COMPATIBILITY FUNCTIONS
+// ANALYTICS INTEGRATION FUNCTIONS
 // ================================
 
 /**
- * Get WordPress timezone
+ * Track analytics event - Integration with existing systems
  *
  * @since 1.0.0
- * @return string Timezone string
+ * @param string $metric_type Type of metric (interaction, payment, conversion)
+ * @param string $metric_name Specific metric name
+ * @param mixed  $metric_value Metric value (default: 1)
+ * @param array  $meta Additional metadata
+ * @return bool Success status
  */
-function chatshop_get_timezone()
+function chatshop_track_analytics($metric_type, $metric_name, $metric_value = 1, $meta = array())
 {
-    $timezone = get_option('timezone_string');
-
-    if (empty($timezone)) {
-        $offset = get_option('gmt_offset', 0);
-        $timezone = timezone_name_from_abbr('', $offset * HOUR_IN_SECONDS, 0);
+    // Check if analytics is enabled
+    if (!chatshop_is_analytics_enabled()) {
+        return false;
     }
 
-    return $timezone ?: 'UTC';
+    $analytics = chatshop_get_component('analytics');
+    if (!$analytics || !method_exists($analytics, 'track_event')) {
+        return false;
+    }
+
+    return $analytics->track_event($metric_type, $metric_name, $metric_value, $meta);
 }
 
 /**
- * Get current time in plugin timezone
+ * Track payment conversion - Integration with existing payment system
  *
  * @since 1.0.0
- * @param string $format Date format
- * @return string Formatted date
+ * @param array  $payment_data Payment data from existing system
+ * @param string $gateway Gateway identifier
+ * @return bool Success status
  */
-function chatshop_current_time($format = 'Y-m-d H:i:s')
+function chatshop_track_payment_conversion($payment_data, $gateway)
 {
-    return current_time($format);
+    if (!chatshop_is_analytics_enabled()) {
+        return false;
+    }
+
+    // Prepare meta data
+    $meta = array(
+        'source_type' => 'whatsapp',
+        'contact_id' => $payment_data['contact_id'] ?? null,
+        'payment_id' => $payment_data['reference'] ?? '',
+        'gateway' => $gateway,
+        'revenue' => isset($payment_data['amount']) ? ($payment_data['amount'] / 100) : 0, // Convert from kobo
+        'currency' => $payment_data['currency'] ?? 'NGN'
+    );
+
+    // Track payment completion
+    chatshop_track_analytics('payment', 'payment_completed', 1, $meta);
+
+    // Track conversion
+    chatshop_track_analytics('conversion', 'whatsapp_to_payment', 1, $meta);
+
+    return true;
+}
+
+/**
+ * Track contact interaction - Integration with existing contact system
+ *
+ * @since 1.0.0
+ * @param int    $contact_id Contact ID
+ * @param string $interaction_type Type of interaction
+ * @param array  $meta Additional metadata
+ * @return bool Success status
+ */
+function chatshop_track_contact_interaction($contact_id, $interaction_type, $meta = array())
+{
+    if (!chatshop_is_analytics_enabled()) {
+        return false;
+    }
+
+    // Prepare meta data
+    $meta['contact_id'] = $contact_id;
+    $meta['source_type'] = $meta['source_type'] ?? 'whatsapp';
+
+    return chatshop_track_analytics('interaction', $interaction_type, 1, $meta);
+}
+
+// ================================
+// HELPER FUNCTIONS FOR INTEGRATION
+// ================================
+
+/**
+ * Format currency amount for display
+ *
+ * @since 1.0.0
+ * @param float  $amount Amount to format
+ * @param string $currency Currency code
+ * @return string Formatted amount
+ */
+function chatshop_format_currency($amount, $currency = '')
+{
+    if (empty($currency)) {
+        $currency = chatshop_get_default_currency();
+    }
+
+    $currencies = chatshop_get_supported_currencies();
+    $symbol = '₦'; // Default to Naira
+
+    switch ($currency) {
+        case 'USD':
+            $symbol = '$';
+            break;
+        case 'EUR':
+            $symbol = '€';
+            break;
+        case 'GBP':
+            $symbol = '£';
+            break;
+        case 'ZAR':
+            $symbol = 'R';
+            break;
+        case 'GHS':
+            $symbol = '₵';
+            break;
+        case 'KES':
+            $symbol = 'KSh';
+            break;
+    }
+
+    return $symbol . number_format($amount, 2);
+}
+
+/**
+ * Get contact by phone number - Integration helper
+ *
+ * @since 1.0.0
+ * @param string $phone Phone number
+ * @return array|null Contact data
+ */
+function chatshop_get_contact_by_phone($phone)
+{
+    $contact_manager = chatshop_get_component('contact_manager');
+
+    if (!$contact_manager || !method_exists($contact_manager, 'get_contact_by_phone')) {
+        return null;
+    }
+
+    return $contact_manager->get_contact_by_phone($phone);
+}
+
+/**
+ * Send WhatsApp message - Integration helper
+ *
+ * @since 1.0.0
+ * @param string $phone Phone number
+ * @param string $message Message content
+ * @param array  $options Additional options
+ * @return array Result array
+ */
+function chatshop_send_whatsapp_message($phone, $message, $options = array())
+{
+    $whatsapp_manager = chatshop_get_component('whatsapp_manager');
+
+    if (!$whatsapp_manager || !method_exists($whatsapp_manager, 'send_message')) {
+        return array(
+            'success' => false,
+            'message' => __('WhatsApp integration not available', 'chatshop')
+        );
+    }
+
+    return $whatsapp_manager->send_message($phone, $message, 'text', $options);
+}
+
+/**
+ * Check if function exists to prevent redeclaration errors
+ *
+ * @since 1.0.0
+ * @param string $function_name Function name to check
+ * @return bool Whether function exists
+ */
+function chatshop_function_exists($function_name)
+{
+    return function_exists($function_name);
+}
+
+// ================================
+// DEBUGGING AND DEVELOPMENT HELPERS
+// ================================
+
+/**
+ * Debug log function - only works in debug mode
+ *
+ * @since 1.0.0
+ * @param mixed $data Data to log
+ * @param string $label Optional label
+ */
+function chatshop_debug_log($data, $label = '')
+{
+    if (!chatshop_is_debug_mode()) {
+        return;
+    }
+
+    $message = $label ? "[{$label}] " : '';
+
+    if (is_array($data) || is_object($data)) {
+        $message .= print_r($data, true);
+    } else {
+        $message .= (string) $data;
+    }
+
+    chatshop_log($message, 'debug');
+}
+
+/**
+ * Get plugin file header information
+ *
+ * @since 1.0.0
+ * @param string $header Header name
+ * @return string Header value
+ */
+function chatshop_get_plugin_header($header)
+{
+    if (!function_exists('get_plugin_data')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $plugin_data = get_plugin_data(CHATSHOP_PLUGIN_FILE);
+    return isset($plugin_data[$header]) ? $plugin_data[$header] : '';
 }

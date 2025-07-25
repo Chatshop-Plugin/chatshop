@@ -1,10 +1,13 @@
 <?php
 
 /**
- * The public-facing functionality of the plugin
+ * ChatShop Public Class
+ *
+ * Handles all public-facing functionality of the plugin including
+ * shortcodes, frontend assets, and payment processing pages.
  *
  * @package ChatShop
- * @subpackage ChatShop/public
+ * @subpackage Public
  * @since 1.0.0
  */
 
@@ -16,34 +19,38 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * The public-facing functionality of the plugin
- *
- * Defines the plugin name, version, and hooks for the public-facing side of the site.
+ * ChatShop Public Class
  *
  * @since 1.0.0
  */
 class ChatShop_Public
 {
     /**
-     * The version of this plugin
-     *
-     * @since 1.0.0
-     * @var string
-     */
-    private $version;
-
-    /**
-     * Initialize the class and set its properties
+     * Constructor
      *
      * @since 1.0.0
      */
     public function __construct()
     {
-        $this->version = defined('CHATSHOP_VERSION') ? CHATSHOP_VERSION : '1.0.0';
+        $this->init_hooks();
     }
 
     /**
-     * Register the stylesheets for the public-facing side of the site
+     * Initialize hooks
+     *
+     * @since 1.0.0
+     */
+    private function init_hooks()
+    {
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_styles'));
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
+        add_action('init', array($this, 'init_shortcodes'));
+        add_action('init', array($this, 'handle_payment_callbacks'));
+        add_action('template_redirect', array($this, 'handle_payment_pages'));
+    }
+
+    /**
+     * Enqueue public styles
      *
      * @since 1.0.0
      */
@@ -53,13 +60,13 @@ class ChatShop_Public
             'chatshop-public',
             CHATSHOP_PLUGIN_URL . 'public/css/chatshop-public.css',
             array(),
-            $this->version,
+            CHATSHOP_VERSION,
             'all'
         );
     }
 
     /**
-     * Register the JavaScript for the public-facing side of the site
+     * Enqueue public scripts
      *
      * @since 1.0.0
      */
@@ -69,83 +76,32 @@ class ChatShop_Public
             'chatshop-public',
             CHATSHOP_PLUGIN_URL . 'public/js/chatshop-public.js',
             array('jquery'),
-            $this->version,
+            CHATSHOP_VERSION,
             true
         );
 
-        // Localize script with public data
-        wp_localize_script('chatshop-public', 'chatshop_public', array(
-            'ajax_url'   => admin_url('admin-ajax.php'),
-            'nonce'      => wp_create_nonce('chatshop_public_nonce'),
-            'plugin_url' => CHATSHOP_PLUGIN_URL,
-            'strings'    => array(
-                'loading'        => __('Loading...', 'chatshop'),
-                'error'          => __('An error occurred. Please try again.', 'chatshop'),
-                'success'        => __('Success!', 'chatshop'),
-                'whatsapp_text'  => __('Chat with us on WhatsApp', 'chatshop')
+        // Localize script for AJAX
+        wp_localize_script('chatshop-public', 'chatshopPublic', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('chatshop_public_nonce'),
+            'strings' => array(
+                'processing' => __('Processing...', 'chatshop'),
+                'error' => __('An error occurred. Please try again.', 'chatshop'),
+                'success' => __('Success!', 'chatshop')
             )
         ));
     }
 
     /**
-     * Register shortcodes
+     * Initialize shortcodes
      *
      * @since 1.0.0
      */
-    public function register_shortcodes()
+    public function init_shortcodes()
     {
-        add_shortcode('chatshop_whatsapp_button', array($this, 'whatsapp_button_shortcode'));
         add_shortcode('chatshop_payment_link', array($this, 'payment_link_shortcode'));
+        add_shortcode('chatshop_whatsapp_button', array($this, 'whatsapp_button_shortcode'));
         add_shortcode('chatshop_contact_form', array($this, 'contact_form_shortcode'));
-    }
-
-    /**
-     * WhatsApp button shortcode
-     *
-     * @since 1.0.0
-     * @param array $atts Shortcode attributes
-     * @return string
-     */
-    public function whatsapp_button_shortcode($atts)
-    {
-        $atts = shortcode_atts(array(
-            'phone'   => '',
-            'message' => '',
-            'text'    => __('Chat on WhatsApp', 'chatshop'),
-            'style'   => 'button'
-        ), $atts, 'chatshop_whatsapp_button');
-
-        // Get phone number from settings if not provided
-        if (empty($atts['phone'])) {
-            $whatsapp_options = get_option('chatshop_whatsapp_options', array());
-            $atts['phone'] = isset($whatsapp_options['phone_number']) ? $whatsapp_options['phone_number'] : '';
-        }
-
-        if (empty($atts['phone'])) {
-            return '<p class="chatshop-error">' . __('WhatsApp phone number not configured.', 'chatshop') . '</p>';
-        }
-
-        // Clean phone number
-        $phone = preg_replace('/[^0-9]/', '', $atts['phone']);
-
-        // Build WhatsApp URL
-        $whatsapp_url = 'https://wa.me/' . $phone;
-        if (!empty($atts['message'])) {
-            $whatsapp_url .= '?text=' . urlencode($atts['message']);
-        }
-
-        // Generate button HTML
-        $classes = array('chatshop-whatsapp-button');
-        if ($atts['style'] === 'floating') {
-            $classes[] = 'chatshop-floating';
-        }
-
-        return sprintf(
-            '<a href="%s" target="_blank" rel="noopener" class="%s">%s</a>',
-            esc_url($whatsapp_url),
-            esc_attr(implode(' ', $classes)),
-            esc_html($atts['text'])
-        );
     }
 
     /**
@@ -153,39 +109,99 @@ class ChatShop_Public
      *
      * @since 1.0.0
      * @param array $atts Shortcode attributes
-     * @return string
+     * @return string HTML output
      */
     public function payment_link_shortcode($atts)
     {
         $atts = shortcode_atts(array(
-            'amount'      => '',
-            'description' => '',
+            'amount' => '1000',
+            'currency' => 'NGN',
+            'description' => __('Payment', 'chatshop'),
             'button_text' => __('Pay Now', 'chatshop'),
-            'currency'    => 'NGN'
+            'gateway' => 'paystack'
         ), $atts, 'chatshop_payment_link');
 
-        if (empty($atts['amount'])) {
-            return '<p class="chatshop-error">' . __('Payment amount is required.', 'chatshop') . '</p>';
+        // Sanitize attributes
+        $amount = absint($atts['amount']);
+        $currency = sanitize_text_field($atts['currency']);
+        $description = sanitize_text_field($atts['description']);
+        $button_text = sanitize_text_field($atts['button_text']);
+        $gateway = sanitize_text_field($atts['gateway']);
+
+        if ($amount <= 0) {
+            return '<p class="chatshop-error">' . __('Invalid payment amount.', 'chatshop') . '</p>';
         }
 
-        // Generate unique payment link ID
-        $link_id = 'pl_' . wp_generate_uuid4();
+        // Generate payment link
+        $payment_manager = chatshop_get_component('payment_manager');
+        if (!$payment_manager) {
+            return '<p class="chatshop-error">' . __('Payment system not available.', 'chatshop') . '</p>';
+        }
 
-        // Create payment link (this will be handled by payment component when available)
+        $link_id = wp_generate_password(12, false);
         $payment_url = add_query_arg(array(
-            'chatshop_action' => 'payment',
-            'link_id'         => $link_id,
-            'amount'          => $atts['amount'],
-            'currency'        => $atts['currency']
-        ), home_url());
+            'chatshop_payment' => $link_id,
+            'amount' => $amount,
+            'currency' => $currency,
+            'description' => urlencode($description),
+            'gateway' => $gateway
+        ), home_url('/'));
 
-        return sprintf(
-            '<a href="%s" class="chatshop-payment-button" data-amount="%s" data-currency="%s">%s</a>',
-            esc_url($payment_url),
-            esc_attr($atts['amount']),
-            esc_attr($atts['currency']),
-            esc_html($atts['button_text'])
-        );
+        ob_start();
+?>
+        <div class="chatshop-payment-link">
+            <a href="<?php echo esc_url($payment_url); ?>" class="chatshop-payment-button" data-amount="<?php echo esc_attr($amount); ?>">
+                <?php echo esc_html($button_text); ?>
+            </a>
+            <div class="chatshop-payment-details">
+                <span class="amount"><?php echo chatshop_format_currency($amount, $currency); ?></span>
+                <span class="description"><?php echo esc_html($description); ?></span>
+            </div>
+        </div>
+    <?php
+        return ob_get_clean();
+    }
+
+    /**
+     * WhatsApp button shortcode
+     *
+     * @since 1.0.0
+     * @param array $atts Shortcode attributes
+     * @return string HTML output
+     */
+    public function whatsapp_button_shortcode($atts)
+    {
+        $atts = shortcode_atts(array(
+            'phone' => '',
+            'message' => __('Hello, I\'m interested in your product.', 'chatshop'),
+            'button_text' => __('Chat on WhatsApp', 'chatshop'),
+            'style' => 'button'
+        ), $atts, 'chatshop_whatsapp_button');
+
+        $phone = sanitize_text_field($atts['phone']);
+        $message = sanitize_text_field($atts['message']);
+        $button_text = sanitize_text_field($atts['button_text']);
+        $style = sanitize_text_field($atts['style']);
+
+        if (empty($phone)) {
+            return '<p class="chatshop-error">' . __('Phone number is required.', 'chatshop') . '</p>';
+        }
+
+        $whatsapp_url = 'https://api.whatsapp.com/send?' . http_build_query(array(
+            'phone' => $phone,
+            'text' => $message
+        ));
+
+        ob_start();
+    ?>
+        <div class="chatshop-whatsapp-button chatshop-style-<?php echo esc_attr($style); ?>">
+            <a href="<?php echo esc_url($whatsapp_url); ?>" target="_blank" rel="noopener noreferrer" class="chatshop-whatsapp-link">
+                <span class="chatshop-whatsapp-icon">📱</span>
+                <?php echo esc_html($button_text); ?>
+            </a>
+        </div>
+    <?php
+        return ob_get_clean();
     }
 
     /**
@@ -193,182 +209,259 @@ class ChatShop_Public
      *
      * @since 1.0.0
      * @param array $atts Shortcode attributes
-     * @return string
+     * @return string HTML output
      */
     public function contact_form_shortcode($atts)
     {
         $atts = shortcode_atts(array(
-            'title'       => __('Contact Us', 'chatshop'),
-            'redirect'    => 'whatsapp',
-            'button_text' => __('Send Message', 'chatshop')
+            'title' => __('Contact Us', 'chatshop'),
+            'submit_text' => __('Submit', 'chatshop'),
+            'redirect_url' => ''
         ), $atts, 'chatshop_contact_form');
 
-        ob_start();
-?>
-        <div class="chatshop-contact-form">
-            <h3><?php echo esc_html($atts['title']); ?></h3>
-            <form class="chatshop-form" data-redirect="<?php echo esc_attr($atts['redirect']); ?>">
-                <?php wp_nonce_field('chatshop_contact_form', 'chatshop_nonce'); ?>
+        $title = sanitize_text_field($atts['title']);
+        $submit_text = sanitize_text_field($atts['submit_text']);
+        $redirect_url = esc_url($atts['redirect_url']);
 
-                <div class="chatshop-field">
+        ob_start();
+    ?>
+        <div class="chatshop-contact-form">
+            <h3><?php echo esc_html($title); ?></h3>
+            <form method="post" action="" class="chatshop-form">
+                <?php wp_nonce_field('chatshop_contact_form', 'chatshop_nonce'); ?>
+                <input type="hidden" name="action" value="chatshop_submit_contact">
+                <?php if ($redirect_url): ?>
+                    <input type="hidden" name="redirect_url" value="<?php echo esc_attr($redirect_url); ?>">
+                <?php endif; ?>
+
+                <div class="form-group">
                     <label for="chatshop_name"><?php _e('Name', 'chatshop'); ?> *</label>
                     <input type="text" id="chatshop_name" name="name" required>
                 </div>
 
-                <div class="chatshop-field">
+                <div class="form-group">
+                    <label for="chatshop_phone"><?php _e('Phone Number', 'chatshop'); ?> *</label>
+                    <input type="tel" id="chatshop_phone" name="phone" required>
+                </div>
+
+                <div class="form-group">
                     <label for="chatshop_email"><?php _e('Email', 'chatshop'); ?></label>
                     <input type="email" id="chatshop_email" name="email">
                 </div>
 
-                <div class="chatshop-field">
-                    <label for="chatshop_phone"><?php _e('Phone', 'chatshop'); ?> *</label>
-                    <input type="tel" id="chatshop_phone" name="phone" required>
+                <div class="form-group">
+                    <label for="chatshop_message"><?php _e('Message', 'chatshop'); ?></label>
+                    <textarea id="chatshop_message" name="message" rows="4"></textarea>
                 </div>
 
-                <div class="chatshop-field">
-                    <label for="chatshop_message"><?php _e('Message', 'chatshop'); ?> *</label>
-                    <textarea id="chatshop_message" name="message" rows="4" required></textarea>
-                </div>
-
-                <div class="chatshop-field">
+                <div class="form-group">
                     <button type="submit" class="chatshop-submit-button">
-                        <?php echo esc_html($atts['button_text']); ?>
+                        <?php echo esc_html($submit_text); ?>
                     </button>
                 </div>
             </form>
         </div>
-<?php
+    <?php
         return ob_get_clean();
     }
 
     /**
-     * Handle AJAX requests
+     * Handle payment callbacks
      *
      * @since 1.0.0
      */
-    public function handle_ajax_request()
+    public function handle_payment_callbacks()
     {
-        // Verify nonce
-        if (!wp_verify_nonce($_POST['nonce'], 'chatshop_public_nonce')) {
-            wp_die(__('Security check failed', 'chatshop'));
-        }
-
-        $action = sanitize_text_field($_POST['chatshop_action']);
-
-        switch ($action) {
-            case 'submit_contact_form':
-                $this->handle_contact_form_submission();
-                break;
-
-            case 'generate_payment_link':
-                $this->handle_payment_link_generation();
-                break;
-
-            default:
-                wp_send_json_error(__('Invalid action', 'chatshop'));
+        if (isset($_GET['chatshop_callback']) && isset($_GET['reference'])) {
+            $this->process_payment_callback();
         }
     }
 
     /**
-     * Handle contact form submission
+     * Handle payment pages
      *
      * @since 1.0.0
      */
-    private function handle_contact_form_submission()
+    public function handle_payment_pages()
     {
-        // Verify nonce
-        if (!wp_verify_nonce($_POST['chatshop_nonce'], 'chatshop_contact_form')) {
-            wp_send_json_error(__('Security check failed', 'chatshop'));
+        if (isset($_GET['chatshop_payment'])) {
+            $this->display_payment_page();
+        }
+    }
+
+    /**
+     * Process payment callback
+     *
+     * @since 1.0.0
+     */
+    private function process_payment_callback()
+    {
+        $reference = sanitize_text_field($_GET['reference']);
+        $gateway = isset($_GET['gateway']) ? sanitize_text_field($_GET['gateway']) : 'paystack';
+
+        if (empty($reference)) {
+            wp_die(__('Invalid payment reference.', 'chatshop'));
         }
 
-        // Sanitize input data
-        $name = sanitize_text_field($_POST['name']);
-        $email = sanitize_email($_POST['email']);
-        $phone = sanitize_text_field($_POST['phone']);
-        $message = sanitize_textarea_field($_POST['message']);
-        $redirect = sanitize_text_field($_POST['redirect']);
-
-        // Validate required fields
-        if (empty($name) || empty($phone) || empty($message)) {
-            wp_send_json_error(__('Please fill in all required fields.', 'chatshop'));
+        // Get payment manager
+        $payment_manager = chatshop_get_component('payment_manager');
+        if (!$payment_manager) {
+            wp_die(__('Payment system not available.', 'chatshop'));
         }
 
-        // Store contact information (this will be handled by WhatsApp component when available)
-        $contact_data = array(
-            'name'    => $name,
-            'email'   => $email,
-            'phone'   => $phone,
-            'message' => $message,
-            'source'  => 'contact_form',
-            'created' => current_time('mysql')
+        // Verify the payment
+        $gateway_instance = $payment_manager->get_gateway($gateway);
+        if (!$gateway_instance) {
+            wp_die(__('Payment gateway not available.', 'chatshop'));
+        }
+
+        $verification_result = $gateway_instance->verify_transaction($reference);
+
+        if (is_wp_error($verification_result)) {
+            wp_die($verification_result->get_error_message());
+        }
+
+        // Display payment result
+        $this->display_payment_result($verification_result);
+    }
+
+    /**
+     * Display payment page
+     *
+     * @since 1.0.0
+     */
+    private function display_payment_page()
+    {
+        $payment_id = sanitize_text_field($_GET['chatshop_payment']);
+        $amount = isset($_GET['amount']) ? absint($_GET['amount']) : 0;
+        $currency = isset($_GET['currency']) ? sanitize_text_field($_GET['currency']) : 'NGN';
+        $description = isset($_GET['description']) ? sanitize_text_field($_GET['description']) : '';
+        $gateway = isset($_GET['gateway']) ? sanitize_text_field($_GET['gateway']) : 'paystack';
+
+        if ($amount <= 0) {
+            wp_die(__('Invalid payment amount.', 'chatshop'));
+        }
+
+        // Load payment page template
+        $this->load_payment_template($payment_id, $amount, $currency, $description, $gateway);
+    }
+
+    /**
+     * Load payment template
+     *
+     * @since 1.0.0
+     * @param string $payment_id Payment ID
+     * @param int    $amount Amount
+     * @param string $currency Currency
+     * @param string $description Description
+     * @param string $gateway Gateway
+     */
+    private function load_payment_template($payment_id, $amount, $currency, $description, $gateway)
+    {
+        // Set up template variables
+        $template_vars = array(
+            'payment_id' => $payment_id,
+            'amount' => $amount,
+            'currency' => $currency,
+            'description' => $description,
+            'gateway' => $gateway,
+            'formatted_amount' => chatshop_format_currency($amount, $currency)
         );
 
-        // For now, just store as option (temporary until database component is ready)
-        $contacts = get_option('chatshop_temp_contacts', array());
-        $contacts[] = $contact_data;
-        update_option('chatshop_temp_contacts', $contacts);
+        // Load template
+        $template_path = CHATSHOP_PLUGIN_DIR . 'public/partials/payment-page.php';
 
-        // Generate response based on redirect type
-        if ($redirect === 'whatsapp') {
-            $whatsapp_options = get_option('chatshop_whatsapp_options', array());
-            $phone_number = isset($whatsapp_options['phone_number']) ? $whatsapp_options['phone_number'] : '';
-
-            if (!empty($phone_number)) {
-                $whatsapp_message = sprintf(
-                    __('Hi, I\'m %s. %s', 'chatshop'),
-                    $name,
-                    $message
-                );
-
-                $whatsapp_url = 'https://wa.me/' . preg_replace('/[^0-9]/', '', $phone_number) .
-                    '?text=' . urlencode($whatsapp_message);
-
-                wp_send_json_success(array(
-                    'redirect_url' => $whatsapp_url,
-                    'message'      => __('Redirecting to WhatsApp...', 'chatshop')
-                ));
-            }
+        if (file_exists($template_path)) {
+            extract($template_vars);
+            include $template_path;
+        } else {
+            $this->display_default_payment_page($template_vars);
         }
 
-        wp_send_json_success(array(
-            'message' => __('Thank you for your message. We will get back to you soon!', 'chatshop')
-        ));
+        exit;
     }
 
     /**
-     * Handle payment link generation
+     * Display default payment page
      *
      * @since 1.0.0
+     * @param array $vars Template variables
      */
-    private function handle_payment_link_generation()
+    private function display_default_payment_page($vars)
     {
-        // This will be implemented when payment component is available
-        wp_send_json_success(array(
-            'payment_url' => '#',
-            'message'     => __('Payment link generated successfully', 'chatshop')
-        ));
+    ?>
+        <!DOCTYPE html>
+        <html <?php language_attributes(); ?>>
+
+        <head>
+            <meta charset="<?php bloginfo('charset'); ?>">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title><?php _e('Payment', 'chatshop'); ?> - <?php bloginfo('name'); ?></title>
+            <?php wp_head(); ?>
+        </head>
+
+        <body class="chatshop-payment-page">
+            <div class="chatshop-payment-container">
+                <h1><?php _e('Complete Your Payment', 'chatshop'); ?></h1>
+                <div class="payment-details">
+                    <p><strong><?php _e('Amount:', 'chatshop'); ?></strong> <?php echo esc_html($vars['formatted_amount']); ?></p>
+                    <?php if ($vars['description']): ?>
+                        <p><strong><?php _e('Description:', 'chatshop'); ?></strong> <?php echo esc_html($vars['description']); ?></p>
+                    <?php endif; ?>
+                </div>
+                <div class="payment-form">
+                    <button id="chatshop-pay-button" class="chatshop-pay-button">
+                        <?php _e('Pay Now', 'chatshop'); ?>
+                    </button>
+                </div>
+            </div>
+            <?php wp_footer(); ?>
+        </body>
+
+        </html>
+    <?php
     }
 
     /**
-     * Add floating WhatsApp button
+     * Display payment result
      *
      * @since 1.0.0
+     * @param array $result Payment result
      */
-    public function add_floating_whatsapp_button()
+    private function display_payment_result($result)
     {
-        $general_options = get_option('chatshop_general_options', array());
+        $success = isset($result['success']) ? $result['success'] : false;
+        $message = isset($result['message']) ? $result['message'] : '';
 
-        if (!isset($general_options['show_floating_button']) || !$general_options['show_floating_button']) {
-            return;
-        }
+    ?>
+        <!DOCTYPE html>
+        <html <?php language_attributes(); ?>>
 
-        $whatsapp_options = get_option('chatshop_whatsapp_options', array());
-        $phone_number = isset($whatsapp_options['phone_number']) ? $whatsapp_options['phone_number'] : '';
+        <head>
+            <meta charset="<?php bloginfo('charset'); ?>">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title><?php _e('Payment Result', 'chatshop'); ?> - <?php bloginfo('name'); ?></title>
+            <?php wp_head(); ?>
+        </head>
 
-        if (empty($phone_number)) {
-            return;
-        }
+        <body class="chatshop-payment-result">
+            <div class="chatshop-result-container">
+                <div class="result-icon <?php echo $success ? 'success' : 'error'; ?>">
+                    <?php echo $success ? '✓' : '✗'; ?>
+                </div>
+                <h1><?php echo $success ? __('Payment Successful!', 'chatshop') : __('Payment Failed', 'chatshop'); ?></h1>
+                <?php if ($message): ?>
+                    <p class="result-message"><?php echo esc_html($message); ?></p>
+                <?php endif; ?>
+                <a href="<?php echo esc_url(home_url('/')); ?>" class="return-home">
+                    <?php _e('Return to Home', 'chatshop'); ?>
+                </a>
+            </div>
+            <?php wp_footer(); ?>
+        </body>
 
-        echo do_shortcode('[chatshop_whatsapp_button phone="' . esc_attr($phone_number) . '" style="floating"]');
+        </html>
+<?php
+        exit;
     }
 }
