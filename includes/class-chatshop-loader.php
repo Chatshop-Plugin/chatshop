@@ -1,9 +1,12 @@
 <?php
 
 /**
- * Component Loader Class
+ * Loader Class
  *
- * Handles loading and managing plugin components.
+ * File: includes/class-chatshop-loader.php
+ * 
+ * Handles loading and registration of WordPress hooks and filters.
+ * This is the CORRECT file that should contain ChatShop_Loader class.
  *
  * @package ChatShop
  * @since 1.0.0
@@ -17,301 +20,196 @@ if (!defined('ABSPATH')) {
 }
 
 // Prevent class redeclaration
-if (class_exists('ChatShop\\ChatShop_Component_Loader')) {
+if (class_exists('ChatShop\\ChatShop_Loader')) {
     return;
 }
 
 /**
- * ChatShop Component Loader Class
+ * ChatShop Loader Class
+ *
+ * Responsible for maintaining and registering all hooks that power the plugin.
  *
  * @since 1.0.0
  */
-class ChatShop_Component_Loader
+class ChatShop_Loader
 {
     /**
-     * Component registry instance
-     *
-     * @var ChatShop_Component_Registry
-     * @since 1.0.0
-     */
-    private $registry;
-
-    /**
-     * Loaded component instances
+     * The array of actions registered with WordPress
      *
      * @var array
      * @since 1.0.0
      */
-    private $component_instances = array();
+    protected $actions;
 
     /**
-     * Constructor
+     * The array of filters registered with WordPress
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    protected $filters;
+
+    /**
+     * Initialize the collections used to maintain the actions and filters
      *
      * @since 1.0.0
      */
     public function __construct()
     {
-        $this->registry = new ChatShop_Component_Registry();
-        $this->register_core_components();
+        $this->actions = array();
+        $this->filters = array();
     }
 
     /**
-     * Register core components
+     * Add a new action to the collection to be registered with WordPress
      *
      * @since 1.0.0
+     * @param string $hook The name of the WordPress action that is being registered
+     * @param object $component A reference to the instance of the object on which the action is defined
+     * @param string $callback The name of the function definition on the $component
+     * @param int $priority Optional. The priority at which the function should be fired. Default is 10
+     * @param int $accepted_args Optional. The number of arguments that should be passed to the $callback. Default is 1
      */
-    private function register_core_components()
+    public function add_action($hook, $component, $callback, $priority = 10, $accepted_args = 1)
     {
-        // Register payment component
-        $this->registry->register_component(array(
-            'id' => 'payment',
-            'name' => __('Payment System', 'chatshop'),
-            'description' => __('Handles payment processing and gateway management', 'chatshop'),
-            'path' => CHATSHOP_PLUGIN_DIR . 'components/payment/',
-            'main_file' => 'class-chatshop-payment-manager.php',
-            'class_name' => 'ChatShop_Payment_Manager',
-            'dependencies' => array(),
-            'version' => '1.0.0',
-            'enabled' => true
-        ));
-
-        // Register WhatsApp component (when created)
-        $this->registry->register_component(array(
-            'id' => 'whatsapp',
-            'name' => __('WhatsApp Integration', 'chatshop'),
-            'description' => __('WhatsApp messaging and automation features', 'chatshop'),
-            'path' => CHATSHOP_PLUGIN_DIR . 'components/whatsapp/',
-            'main_file' => 'class-chatshop-whatsapp-manager.php',
-            'class_name' => 'ChatShop_WhatsApp_Manager',
-            'dependencies' => array(),
-            'version' => '1.0.0',
-            'enabled' => false // Disabled until implemented
-        ));
-
-        // Register analytics component - FIXED CONFIGURATION
-        $this->registry->register_component(array(
-            'id' => 'analytics',
-            'name' => __('Analytics & Reporting', 'chatshop'),
-            'description' => __('Track conversions and generate reports', 'chatshop'),
-            'path' => CHATSHOP_PLUGIN_DIR . 'components/analytics/',
-            'main_file' => 'class-chatshop-analytics.php', // FIXED: Correct filename
-            'class_name' => 'ChatShop_Analytics', // FIXED: Correct class name
-            'dependencies' => array('payment'),
-            'version' => '1.0.0',
-            'enabled' => true // FIXED: Enable analytics component
-        ));
-
-        // Allow other plugins/themes to register components
-        do_action('chatshop_register_components', $this->registry);
+        $this->actions = $this->add($this->actions, $hook, $component, $callback, $priority, $accepted_args);
     }
 
     /**
-     * Load all enabled components
+     * Add a new filter to the collection to be registered with WordPress
      *
      * @since 1.0.0
+     * @param string $hook The name of the WordPress filter that is being registered
+     * @param object $component A reference to the instance of the object on which the filter is defined
+     * @param string $callback The name of the function definition on the $component
+     * @param int $priority Optional. The priority at which the function should be fired. Default is 10
+     * @param int $accepted_args Optional. The number of arguments that should be passed to the $callback. Default is 1
      */
-    public function load_components()
+    public function add_filter($hook, $component, $callback, $priority = 10, $accepted_args = 1)
     {
-        $components = $this->registry->get_enabled_components();
-
-        foreach ($components as $component) {
-            $this->load_component($component);
-        }
-
-        // Hook for post-component loading
-        do_action('chatshop_components_loaded', $this->component_instances);
+        $this->filters = $this->add($this->filters, $hook, $component, $callback, $priority, $accepted_args);
     }
 
     /**
-     * Load a specific component
+     * A utility function that is used to register the actions and hooks into a single collection
      *
      * @since 1.0.0
-     * @param array $component Component configuration
-     * @return bool True if loaded successfully, false otherwise
+     * @param array $hooks The collection of hooks that is being registered (that is, actions or filters)
+     * @param string $hook The name of the WordPress filter that is being registered
+     * @param object $component A reference to the instance of the object on which the filter is defined
+     * @param string $callback The name of the function definition on the $component
+     * @param int $priority The priority at which the function should be fired
+     * @param int $accepted_args The number of arguments that should be passed to the $callback
+     * @return array The collection of actions and filters registered with WordPress
      */
-    public function load_component($component)
+    private function add($hooks, $hook, $component, $callback, $priority, $accepted_args)
     {
-        $component_id = $component['id'];
+        $hooks[] = array(
+            'hook' => $hook,
+            'component' => $component,
+            'callback' => $callback,
+            'priority' => $priority,
+            'accepted_args' => $accepted_args
+        );
 
-        // Check if already loaded
-        if (isset($this->component_instances[$component_id])) {
-            return true;
+        return $hooks;
+    }
+
+    /**
+     * Register the filters and actions with WordPress
+     *
+     * @since 1.0.0
+     */
+    public function run()
+    {
+        // Register all actions
+        foreach ($this->actions as $hook) {
+            add_action(
+                $hook['hook'],
+                array($hook['component'], $hook['callback']),
+                $hook['priority'],
+                $hook['accepted_args']
+            );
         }
 
-        // Check dependencies first
-        if (!$this->check_dependencies($component)) {
-            $this->log_error("Component '{$component_id}' dependencies not met");
-            return false;
-        }
-
-        // Build file path
-        $file_path = trailingslashit($component['path']) . $component['main_file'];
-
-        // Check if file exists
-        if (!file_exists($file_path)) {
-            $this->log_error("Component file not found: {$file_path}");
-            return false;
-        }
-
-        // Include the file
-        require_once $file_path;
-
-        // Check if class exists
-        $class_name = "\\ChatShop\\{$component['class_name']}";
-        if (!class_exists($class_name)) {
-            $this->log_error("Component class not found: {$class_name}");
-            return false;
-        }
-
-        // Instantiate the component
-        try {
-            $this->component_instances[$component_id] = new $class_name();
-            $this->log_info("Component '{$component_id}' loaded successfully");
-
-            // REMOVED: Do not call init() method externally
-            // Component should initialize itself in its constructor
-            // if (method_exists($this->component_instances[$component_id], 'init')) {
-            //     $this->component_instances[$component_id]->init();
-            // }
-
-            return true;
-        } catch (\Exception $e) {
-            $this->log_error("Failed to instantiate component '{$component_id}': " . $e->getMessage());
-            return false;
+        // Register all filters
+        foreach ($this->filters as $hook) {
+            add_filter(
+                $hook['hook'],
+                array($hook['component'], $hook['callback']),
+                $hook['priority'],
+                $hook['accepted_args']
+            );
         }
     }
 
     /**
-     * Check component dependencies
+     * Get all registered actions
      *
      * @since 1.0.0
-     * @param array $component Component configuration
-     * @return bool True if dependencies are met, false otherwise
+     * @return array Array of registered actions
      */
-    private function check_dependencies($component)
+    public function get_actions()
     {
-        if (empty($component['dependencies'])) {
-            return true;
-        }
+        return $this->actions;
+    }
 
-        foreach ($component['dependencies'] as $dependency) {
-            if (!isset($this->component_instances[$dependency])) {
-                // Try to load the dependency
-                $dependency_component = $this->registry->get_component($dependency);
-                if (!$dependency_component || !$this->load_component($dependency_component)) {
-                    return false;
-                }
+    /**
+     * Get all registered filters
+     *
+     * @since 1.0.0
+     * @return array Array of registered filters
+     */
+    public function get_filters()
+    {
+        return $this->filters;
+    }
+
+    /**
+     * Remove an action from the collection
+     *
+     * @since 1.0.0
+     * @param string $hook The name of the WordPress action
+     * @param object $component The component object
+     * @param string $callback The callback method name
+     * @return bool True if removed, false otherwise
+     */
+    public function remove_action($hook, $component, $callback)
+    {
+        foreach ($this->actions as $key => $action) {
+            if (
+                $action['hook'] === $hook &&
+                $action['component'] === $component &&
+                $action['callback'] === $callback
+            ) {
+                unset($this->actions[$key]);
+                return true;
             }
         }
-
-        return true;
+        return false;
     }
 
     /**
-     * Get component instance
+     * Remove a filter from the collection
      *
      * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return object|null Component instance or null if not found
+     * @param string $hook The name of the WordPress filter
+     * @param object $component The component object
+     * @param string $callback The callback method name
+     * @return bool True if removed, false otherwise
      */
-    public function get_component_instance($component_id)
+    public function remove_filter($hook, $component, $callback)
     {
-        return isset($this->component_instances[$component_id]) ?
-            $this->component_instances[$component_id] : null;
-    }
-
-    /**
-     * Get all component instances
-     *
-     * @since 1.0.0
-     * @return array Array of component instances
-     */
-    public function get_all_instances()
-    {
-        return $this->component_instances;
-    }
-
-    /**
-     * Enable a component
-     *
-     * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return bool True if enabled successfully, false otherwise
-     */
-    public function enable_component($component_id)
-    {
-        $component = $this->registry->get_component($component_id);
-        if (!$component) {
-            return false;
-        }
-
-        // Update registry
-        $this->registry->enable_component($component_id);
-
-        // Load the component
-        return $this->load_component($component);
-    }
-
-    /**
-     * Disable a component
-     *
-     * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return bool True if disabled successfully, false otherwise
-     */
-    public function disable_component($component_id)
-    {
-        // Unload component instance
-        if (isset($this->component_instances[$component_id])) {
-            // Call cleanup method if it exists
-            if (method_exists($this->component_instances[$component_id], 'cleanup')) {
-                $this->component_instances[$component_id]->cleanup();
+        foreach ($this->filters as $key => $filter) {
+            if (
+                $filter['hook'] === $hook &&
+                $filter['component'] === $component &&
+                $filter['callback'] === $callback
+            ) {
+                unset($this->filters[$key]);
+                return true;
             }
-            unset($this->component_instances[$component_id]);
         }
-
-        // Update registry
-        return $this->registry->disable_component($component_id);
-    }
-
-    /**
-     * Get component registry
-     *
-     * @since 1.0.0
-     * @return ChatShop_Component_Registry Registry instance
-     */
-    public function get_registry()
-    {
-        return $this->registry;
-    }
-
-    /**
-     * Log error message
-     *
-     * @since 1.0.0
-     * @param string $message Error message
-     */
-    private function log_error($message)
-    {
-        if (function_exists('chatshop_log')) {
-            chatshop_log($message, 'error');
-        } else {
-            error_log("ChatShop Component Loader: {$message}");
-        }
-    }
-
-    /**
-     * Log info message
-     *
-     * @since 1.0.0
-     * @param string $message Info message
-     */
-    private function log_info($message)
-    {
-        if (function_exists('chatshop_log')) {
-            chatshop_log($message, 'info');
-        } else {
-            error_log("ChatShop Component Loader: {$message}");
-        }
+        return false;
     }
 }
