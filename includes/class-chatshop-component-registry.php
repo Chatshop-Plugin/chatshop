@@ -1,9 +1,12 @@
 <?php
 
 /**
- * Component Registry Class
+ * Component Registry Class - SAFE VERSION
  *
- * Manages component registration and configuration.
+ * File: includes/class-chatshop-component-registry.php
+ * 
+ * Manages component registration and configuration with enhanced
+ * class conflict prevention and error handling.
  *
  * @package ChatShop
  * @since 1.0.0
@@ -16,8 +19,19 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Prevent class redeclaration with detailed check
+if (class_exists('ChatShop\\ChatShop_Component_Registry')) {
+    // Log the duplicate attempt if logging is available
+    if (function_exists('error_log')) {
+        error_log('ChatShop: Attempted to redeclare ChatShop_Component_Registry class');
+    }
+    return;
+}
+
 /**
- * ChatShop Component Registry Class
+ * ChatShop Component Registry Class - SAFE VERSION
+ *
+ * Enhanced with better error handling and conflict prevention.
  *
  * @since 1.0.0
  */
@@ -40,6 +54,22 @@ class ChatShop_Component_Registry
     private $settings_option = 'chatshop_component_settings';
 
     /**
+     * Component settings cache
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $settings_cache = null;
+
+    /**
+     * Registry lock to prevent race conditions
+     *
+     * @var bool
+     * @since 1.0.0
+     */
+    private $registry_locked = false;
+
+    /**
      * Constructor
      *
      * @since 1.0.0
@@ -47,10 +77,11 @@ class ChatShop_Component_Registry
     public function __construct()
     {
         $this->load_settings();
+        add_action('shutdown', array($this, 'save_settings'));
     }
 
     /**
-     * Register a component
+     * Register a component with enhanced validation
      *
      * @since 1.0.0
      * @param array $config Component configuration
@@ -58,6 +89,12 @@ class ChatShop_Component_Registry
      */
     public function register_component($config)
     {
+        // Check if registry is locked
+        if ($this->registry_locked) {
+            $this->log_error('Cannot register component: Registry is locked');
+            return false;
+        }
+
         // Validate required fields
         $required_fields = array('id', 'name', 'path', 'main_file', 'class_name');
         foreach ($required_fields as $field) {
@@ -67,21 +104,25 @@ class ChatShop_Component_Registry
             }
         }
 
-        // Set defaults
+        // Set defaults with better structure
         $defaults = array(
             'description' => '',
             'dependencies' => array(),
             'version' => '1.0.0',
             'enabled' => false,
             'auto_load' => true,
-            'priority' => 10
+            'priority' => 10,
+            'supports' => array(),
+            'requires' => array(),
+            'namespace' => 'ChatShop\\',
+            'status' => 'inactive'
         );
 
         $config = wp_parse_args($config, $defaults);
 
-        // Validate component ID
+        // Validate component ID format
         if (!$this->is_valid_component_id($config['id'])) {
-            $this->log_error("Invalid component ID: {$config['id']}");
+            $this->log_error("Invalid component ID format: {$config['id']}");
             return false;
         }
 
@@ -91,10 +132,116 @@ class ChatShop_Component_Registry
             return false;
         }
 
+        // Validate file paths
+        if (!$this->validate_component_paths($config)) {
+            $this->log_error("Component file validation failed: {$config['id']}");
+            return false;
+        }
+
+        // Validate class name format
+        if (!$this->validate_class_name($config['class_name'])) {
+            $this->log_error("Invalid class name format: {$config['class_name']}");
+            return false;
+        }
+
+        // Add timestamp and unique hash
+        $config['registered_at'] = current_time('mysql');
+        $config['hash'] = md5(serialize($config));
+        $config['status'] = 'registered';
+
         // Store component configuration
         $this->components[$config['id']] = $config;
 
-        $this->log_info("Component registered: {$config['id']}");
+        // Update persistent settings
+        $this->update_component_setting($config['id'], 'enabled', $config['enabled']);
+        $this->update_component_setting($config['id'], 'registered_at', $config['registered_at']);
+
+        $this->log_info("Component registered successfully: {$config['id']}");
+
+        // Fire action for external hooks
+        do_action('chatshop_component_registered', $config['id'], $config);
+
+        return true;
+    }
+
+    /**
+     * Validate component ID format
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool True if valid, false otherwise
+     */
+    private function is_valid_component_id($component_id)
+    {
+        // Check format: letters, numbers, underscores, hyphens only
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $component_id)) {
+            return false;
+        }
+
+        // Check length
+        if (strlen($component_id) < 2 || strlen($component_id) > 50) {
+            return false;
+        }
+
+        // Check reserved names
+        $reserved_names = array('core', 'admin', 'public', 'wp', 'wordpress', 'chatshop_core');
+        if (in_array(strtolower($component_id), $reserved_names)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate component file paths
+     *
+     * @since 1.0.0
+     * @param array $config Component configuration
+     * @return bool True if valid, false otherwise
+     */
+    private function validate_component_paths($config)
+    {
+        // Check if path exists and is readable
+        if (!is_dir($config['path']) || !is_readable($config['path'])) {
+            return false;
+        }
+
+        // Check if main file exists
+        $main_file_path = trailingslashit($config['path']) . $config['main_file'];
+        if (!file_exists($main_file_path) || !is_readable($main_file_path)) {
+            return false;
+        }
+
+        // Additional security check: ensure files are within plugin directory
+        $plugin_dir = defined('CHATSHOP_PLUGIN_DIR') ? CHATSHOP_PLUGIN_DIR : '';
+        if (!empty($plugin_dir) && strpos(realpath($config['path']), realpath($plugin_dir)) !== 0) {
+            $this->log_error("Component path outside plugin directory: {$config['path']}");
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate class name format
+     *
+     * @since 1.0.0
+     * @param string $class_name Class name to validate
+     * @return bool True if valid, false otherwise
+     */
+    private function validate_class_name($class_name)
+    {
+        // Check if it's a valid PHP class name
+        if (!preg_match('/^[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff\\\\]*$/', $class_name)) {
+            return false;
+        }
+
+        // Check if class already exists (to prevent conflicts)
+        if (class_exists($class_name)) {
+            $this->log_error("Class already exists: {$class_name}");
+            return false;
+        }
+
         return true;
     }
 
@@ -111,8 +258,20 @@ class ChatShop_Component_Registry
             return false;
         }
 
+        // Fire action before unregistering
+        do_action('chatshop_component_before_unregister', $component_id, $this->components[$component_id]);
+
+        // Remove from components array
         unset($this->components[$component_id]);
+
+        // Remove from settings
+        $this->delete_component_settings($component_id);
+
         $this->log_info("Component unregistered: {$component_id}");
+
+        // Fire action after unregistering
+        do_action('chatshop_component_unregistered', $component_id);
+
         return true;
     }
 
@@ -125,7 +284,17 @@ class ChatShop_Component_Registry
      */
     public function get_component($component_id)
     {
-        return isset($this->components[$component_id]) ? $this->components[$component_id] : null;
+        if (!isset($this->components[$component_id])) {
+            return null;
+        }
+
+        $component = $this->components[$component_id];
+
+        // Merge with persistent settings
+        $enabled = $this->get_component_setting($component_id, 'enabled', $component['enabled']);
+        $component['enabled'] = $enabled;
+
+        return $component;
     }
 
     /**
@@ -136,55 +305,33 @@ class ChatShop_Component_Registry
      */
     public function get_all_components()
     {
-        return $this->components;
+        $components = array();
+
+        foreach ($this->components as $id => $component) {
+            $components[$id] = $this->get_component($id);
+        }
+
+        return $components;
     }
 
     /**
-     * Get enabled components
+     * Get enabled components only
      *
      * @since 1.0.0
      * @return array Array of enabled component configurations
      */
     public function get_enabled_components()
     {
-        $enabled = array();
+        $enabled_components = array();
 
-        foreach ($this->components as $component_id => $component) {
-            if ($this->is_component_enabled($component_id)) {
-                $enabled[$component_id] = $component;
+        foreach ($this->components as $id => $component) {
+            $component_data = $this->get_component($id);
+            if ($component_data && $component_data['enabled']) {
+                $enabled_components[$id] = $component_data;
             }
         }
 
-        // Sort by priority
-        uasort($enabled, function ($a, $b) {
-            return $a['priority'] - $b['priority'];
-        });
-
-        return $enabled;
-    }
-
-    /**
-     * Check if component is enabled
-     *
-     * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return bool True if enabled, false otherwise
-     */
-    public function is_component_enabled($component_id)
-    {
-        if (!isset($this->components[$component_id])) {
-            return false;
-        }
-
-        $settings = get_option($this->settings_option, array());
-
-        // Check user settings first
-        if (isset($settings[$component_id]['enabled'])) {
-            return (bool) $settings[$component_id]['enabled'];
-        }
-
-        // Fall back to default
-        return (bool) $this->components[$component_id]['enabled'];
+        return $enabled_components;
     }
 
     /**
@@ -200,11 +347,12 @@ class ChatShop_Component_Registry
             return false;
         }
 
-        $settings = get_option($this->settings_option, array());
-        $settings[$component_id]['enabled'] = true;
+        $this->update_component_setting($component_id, 'enabled', true);
 
-        update_option($this->settings_option, $settings);
         $this->log_info("Component enabled: {$component_id}");
+
+        // Fire action
+        do_action('chatshop_component_enabled', $component_id);
 
         return true;
     }
@@ -222,13 +370,42 @@ class ChatShop_Component_Registry
             return false;
         }
 
-        $settings = get_option($this->settings_option, array());
-        $settings[$component_id]['enabled'] = false;
+        $this->update_component_setting($component_id, 'enabled', false);
 
-        update_option($this->settings_option, $settings);
         $this->log_info("Component disabled: {$component_id}");
 
+        // Fire action
+        do_action('chatshop_component_disabled', $component_id);
+
         return true;
+    }
+
+    /**
+     * Check if component exists
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool True if exists, false otherwise
+     */
+    public function component_exists($component_id)
+    {
+        return isset($this->components[$component_id]);
+    }
+
+    /**
+     * Check if component is enabled
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return bool True if enabled, false otherwise
+     */
+    public function is_component_enabled($component_id)
+    {
+        if (!isset($this->components[$component_id])) {
+            return false;
+        }
+
+        return $this->get_component_setting($component_id, 'enabled', false);
     }
 
     /**
@@ -238,7 +415,7 @@ class ChatShop_Component_Registry
      * @param string $component_id Component identifier
      * @return array Array of dependency IDs
      */
-    public function get_dependencies($component_id)
+    public function get_component_dependencies($component_id)
     {
         if (!isset($this->components[$component_id])) {
             return array();
@@ -248,61 +425,63 @@ class ChatShop_Component_Registry
     }
 
     /**
-     * Get components that depend on the given component
+     * Lock the registry to prevent further registrations
      *
      * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return array Array of dependent component IDs
      */
-    public function get_dependents($component_id)
+    public function lock_registry()
     {
-        $dependents = array();
-
-        foreach ($this->components as $id => $component) {
-            if (in_array($component_id, $component['dependencies'])) {
-                $dependents[] = $id;
-            }
-        }
-
-        return $dependents;
+        $this->registry_locked = true;
+        $this->log_info('Component registry locked');
     }
 
     /**
-     * Validate component dependencies
+     * Unlock the registry
      *
      * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @return bool True if dependencies are valid, false otherwise
      */
-    public function validate_dependencies($component_id)
+    public function unlock_registry()
     {
-        $dependencies = $this->get_dependencies($component_id);
-
-        foreach ($dependencies as $dependency) {
-            if (!isset($this->components[$dependency])) {
-                return false;
-            }
-        }
-
-        return true;
+        $this->registry_locked = false;
+        $this->log_info('Component registry unlocked');
     }
 
     /**
-     * Update component configuration
+     * Check if registry is locked
      *
      * @since 1.0.0
-     * @param string $component_id Component identifier
-     * @param array $config New configuration
-     * @return bool True if updated successfully, false otherwise
+     * @return bool True if locked, false otherwise
      */
-    public function update_component($component_id, $config)
+    public function is_registry_locked()
     {
-        if (!isset($this->components[$component_id])) {
-            return false;
-        }
+        return $this->registry_locked;
+    }
 
-        $this->components[$component_id] = array_merge($this->components[$component_id], $config);
-        return true;
+    /**
+     * Load component settings from database
+     *
+     * @since 1.0.0
+     */
+    private function load_settings()
+    {
+        if ($this->settings_cache === null) {
+            $this->settings_cache = get_option($this->settings_option, array());
+            if (!is_array($this->settings_cache)) {
+                $this->settings_cache = array();
+            }
+        }
+    }
+
+    /**
+     * Save component settings to database
+     *
+     * @since 1.0.0
+     */
+    public function save_settings()
+    {
+        if ($this->settings_cache !== null) {
+            update_option($this->settings_option, $this->settings_cache);
+        }
     }
 
     /**
@@ -314,12 +493,12 @@ class ChatShop_Component_Registry
      * @param mixed $default Default value
      * @return mixed Setting value
      */
-    public function get_component_setting($component_id, $setting_key, $default = null)
+    private function get_component_setting($component_id, $setting_key, $default = null)
     {
-        $settings = get_option($this->settings_option, array());
+        $this->load_settings();
 
-        if (isset($settings[$component_id][$setting_key])) {
-            return $settings[$component_id][$setting_key];
+        if (isset($this->settings_cache[$component_id][$setting_key])) {
+            return $this->settings_cache[$component_id][$setting_key];
         }
 
         return $default;
@@ -332,51 +511,51 @@ class ChatShop_Component_Registry
      * @param string $component_id Component identifier
      * @param string $setting_key Setting key
      * @param mixed $value Setting value
-     * @return bool True if updated successfully, false otherwise
      */
-    public function update_component_setting($component_id, $setting_key, $value)
+    private function update_component_setting($component_id, $setting_key, $value)
     {
-        $settings = get_option($this->settings_option, array());
-        $settings[$component_id][$setting_key] = $value;
+        $this->load_settings();
 
-        return update_option($this->settings_option, $settings);
+        if (!isset($this->settings_cache[$component_id])) {
+            $this->settings_cache[$component_id] = array();
+        }
+
+        $this->settings_cache[$component_id][$setting_key] = $value;
     }
 
     /**
-     * Load component settings from database
-     *
-     * @since 1.0.0
-     */
-    private function load_settings()
-    {
-        // Settings are loaded when needed
-        // This method is for future use if needed
-    }
-
-    /**
-     * Validate component ID
+     * Delete all settings for a component
      *
      * @since 1.0.0
      * @param string $component_id Component identifier
-     * @return bool True if valid, false otherwise
      */
-    private function is_valid_component_id($component_id)
+    private function delete_component_settings($component_id)
     {
-        // Must be alphanumeric with underscores/hyphens only
-        return preg_match('/^[a-zA-Z0-9_-]+$/', $component_id);
+        $this->load_settings();
+
+        if (isset($this->settings_cache[$component_id])) {
+            unset($this->settings_cache[$component_id]);
+        }
     }
 
     /**
-     * Export component registry for debugging
+     * Get registry statistics
      *
      * @since 1.0.0
-     * @return array Registry data
+     * @return array Registry statistics
      */
-    public function export_registry()
+    public function get_registry_stats()
     {
+        $enabled_count = count($this->get_enabled_components());
+        $total_count = count($this->components);
+
         return array(
-            'components' => $this->components,
-            'settings' => get_option($this->settings_option, array())
+            'total_components' => $total_count,
+            'enabled_components' => $enabled_count,
+            'disabled_components' => $total_count - $enabled_count,
+            'registry_locked' => $this->registry_locked,
+            'memory_usage' => memory_get_usage(true),
+            'last_updated' => current_time('mysql')
         );
     }
 
