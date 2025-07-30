@@ -5,8 +5,8 @@
  *
  * File: includes/class-chatshop-component-loader.php
  * 
- * Handles loading and managing plugin components.
- * This is the CORRECT file that should contain ChatShop_Component_Loader class.
+ * Handles loading and managing plugin components with proper error handling
+ * and analytics component support.
  *
  * @package ChatShop
  * @since 1.0.0
@@ -17,11 +17,6 @@ namespace ChatShop;
 // Prevent direct access
 if (!defined('ABSPATH')) {
     exit;
-}
-
-// Prevent class redeclaration
-if (class_exists('ChatShop\\ChatShop_Component_Loader')) {
-    return;
 }
 
 /**
@@ -99,11 +94,11 @@ class ChatShop_Component_Loader
             'class_name' => 'ChatShop\\ChatShop_WhatsApp_Manager',
             'dependencies' => array(),
             'version' => '1.0.0',
-            'enabled' => false, // Disabled until fully implemented
+            'enabled' => false,
             'priority' => 2
         ));
 
-        // Register analytics component
+        // Register analytics component with proper configuration
         $this->registry->register_component(array(
             'id' => 'analytics',
             'name' => __('Analytics & Reporting', 'chatshop'),
@@ -111,7 +106,7 @@ class ChatShop_Component_Loader
             'path' => CHATSHOP_PLUGIN_DIR . 'components/analytics/',
             'main_file' => 'class-chatshop-analytics.php',
             'class_name' => 'ChatShop\\ChatShop_Analytics',
-            'dependencies' => array('payment'),
+            'dependencies' => array(),
             'version' => '1.0.0',
             'enabled' => true,
             'priority' => 3
@@ -196,133 +191,53 @@ class ChatShop_Component_Loader
         // Construct full path to component file
         $file_path = trailingslashit($component['path']) . $component['main_file'];
 
-        // Check if file exists
         if (!file_exists($file_path)) {
             $this->log_error("Component file not found: {$file_path}");
             return false;
         }
 
         // Load the component file
-        try {
-            require_once $file_path;
+        require_once $file_path;
 
-            // Check if class exists
-            $class_name = $component['class_name'];
-            if (!class_exists($class_name)) {
-                $this->log_error("Component class not found: {$class_name}");
+        // Check if class exists
+        if (!class_exists($component['class_name'])) {
+            $this->log_error("Component class not found: {$component['class_name']}");
+            return false;
+        }
+
+        try {
+            // Create component instance
+            $instance = new $component['class_name']();
+
+            // Check if it extends the abstract component class
+            if (!($instance instanceof ChatShop_Abstract_Component)) {
+                $this->log_error("Component does not extend ChatShop_Abstract_Component: {$component['id']}");
                 return false;
             }
 
-            // Instantiate the component
-            $instance = new $class_name();
+            // Check if component should load (premium check, etc)
+            if (method_exists($instance, 'should_load') && !$instance->should_load()) {
+                $this->log_info("Component skipped (should_load returned false): {$component['id']}");
+                return false;
+            }
+
+            // Initialize the component
+            if (method_exists($instance, 'initialize')) {
+                $instance->initialize();
+            }
 
             // Store the instance
             $this->component_instances[$component['id']] = $instance;
+            $this->loading_order[] = $component['id'];
 
-            // Call activation if component supports it
-            if (method_exists($instance, 'activate')) {
-                $instance->activate();
-            }
+            // Fire action for component loaded
+            do_action("chatshop_component_loaded_{$component['id']}", $instance);
 
             return true;
-        } catch (Exception $e) {
-            $this->log_error("Error loading component {$component['id']}: " . $e->getMessage());
+        } catch (\Exception $e) {
+            $this->log_error("Exception loading component {$component['id']}: " . $e->getMessage());
             return false;
         }
-    }
-
-    /**
-     * Sort components by priority and resolve dependencies
-     *
-     * @since 1.0.0
-     * @param array $components Array of component configurations
-     * @return array Sorted array of components
-     */
-    private function sort_components_by_priority($components)
-    {
-        // First, sort by priority
-        usort($components, function ($a, $b) {
-            return ($a['priority'] ?? 10) - ($b['priority'] ?? 10);
-        });
-
-        // Then resolve dependencies using topological sort
-        return $this->resolve_dependencies($components);
-    }
-
-    /**
-     * Resolve component dependencies using topological sort
-     *
-     * @since 1.0.0
-     * @param array $components Array of component configurations
-     * @return array Sorted array respecting dependencies
-     */
-    private function resolve_dependencies($components)
-    {
-        $resolved = array();
-        $unresolved = array();
-
-        foreach ($components as $component) {
-            $this->resolve_component_dependencies($component, $components, $resolved, $unresolved);
-        }
-
-        return $resolved;
-    }
-
-    /**
-     * Recursively resolve a single component's dependencies
-     *
-     * @since 1.0.0
-     * @param array $component Current component
-     * @param array $all_components All available components
-     * @param array &$resolved Resolved components (by reference)
-     * @param array &$unresolved Currently being resolved (by reference)
-     */
-    private function resolve_component_dependencies($component, $all_components, &$resolved, &$unresolved)
-    {
-        // Check if already resolved
-        foreach ($resolved as $resolved_component) {
-            if ($resolved_component['id'] === $component['id']) {
-                return;
-            }
-        }
-
-        // Check for circular dependencies
-        foreach ($unresolved as $unresolved_component) {
-            if ($unresolved_component['id'] === $component['id']) {
-                $this->log_error("Circular dependency detected for component: {$component['id']}");
-                return;
-            }
-        }
-
-        // Add to unresolved
-        $unresolved[] = $component;
-
-        // Resolve dependencies first
-        if (!empty($component['dependencies'])) {
-            foreach ($component['dependencies'] as $dependency_id) {
-                // Find the dependency component
-                $dependency_component = null;
-                foreach ($all_components as $comp) {
-                    if ($comp['id'] === $dependency_id) {
-                        $dependency_component = $comp;
-                        break;
-                    }
-                }
-
-                if ($dependency_component) {
-                    $this->resolve_component_dependencies($dependency_component, $all_components, $resolved, $unresolved);
-                } else {
-                    $this->log_error("Dependency not found: {$dependency_id} for component {$component['id']}");
-                }
-            }
-        }
-
-        // Remove from unresolved and add to resolved
-        $unresolved = array_filter($unresolved, function ($comp) use ($component) {
-            return $comp['id'] !== $component['id'];
-        });
-
-        $resolved[] = $component;
     }
 
     /**
@@ -330,7 +245,7 @@ class ChatShop_Component_Loader
      *
      * @since 1.0.0
      * @param array $component Component configuration
-     * @return bool True if dependencies are met, false otherwise
+     * @return bool True if dependencies are met
      */
     private function check_dependencies($component)
     {
@@ -338,17 +253,76 @@ class ChatShop_Component_Loader
             return true;
         }
 
-        foreach ($component['dependencies'] as $dependency_id) {
-            if (!isset($this->component_instances[$dependency_id])) {
-                // Try to load the dependency
-                $dependency_component = $this->registry->get_component($dependency_id);
-                if (!$dependency_component || !$this->load_component($dependency_component)) {
-                    return false;
-                }
+        foreach ($component['dependencies'] as $dependency) {
+            if (!isset($this->component_instances[$dependency])) {
+                return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * Sort components by priority and dependencies
+     *
+     * @since 1.0.0
+     * @param array $components Components to sort
+     * @return array Sorted components
+     */
+    private function sort_components_by_priority($components)
+    {
+        // First sort by priority
+        uasort($components, function ($a, $b) {
+            $priority_a = isset($a['priority']) ? $a['priority'] : 10;
+            $priority_b = isset($b['priority']) ? $b['priority'] : 10;
+            return $priority_a - $priority_b;
+        });
+
+        // Then ensure dependencies are loaded first
+        $sorted = array();
+        $processed = array();
+
+        while (count($sorted) < count($components)) {
+            $added = false;
+
+            foreach ($components as $id => $component) {
+                if (isset($processed[$id])) {
+                    continue;
+                }
+
+                // Check if all dependencies are processed
+                $deps_met = true;
+                if (!empty($component['dependencies'])) {
+                    foreach ($component['dependencies'] as $dep) {
+                        if (!isset($processed[$dep])) {
+                            $deps_met = false;
+                            break;
+                        }
+                    }
+                }
+
+                if ($deps_met) {
+                    $sorted[$id] = $component;
+                    $processed[$id] = true;
+                    $added = true;
+                }
+            }
+
+            // Prevent infinite loop
+            if (!$added) {
+                // Add remaining components (circular dependency or missing dependency)
+                foreach ($components as $id => $component) {
+                    if (!isset($processed[$id])) {
+                        $sorted[$id] = $component;
+                        $processed[$id] = true;
+                        $this->log_warning("Component may have unmet dependencies: {$id}");
+                    }
+                }
+                break;
+            }
+        }
+
+        return $sorted;
     }
 
     /**
@@ -360,7 +334,8 @@ class ChatShop_Component_Loader
      */
     public function get_component_instance($component_id)
     {
-        return isset($this->component_instances[$component_id]) ? $this->component_instances[$component_id] : null;
+        return isset($this->component_instances[$component_id]) ?
+            $this->component_instances[$component_id] : null;
     }
 
     /**
@@ -489,6 +464,21 @@ class ChatShop_Component_Loader
             chatshop_log($message, 'info');
         } else {
             error_log("ChatShop Component Loader: {$message}");
+        }
+    }
+
+    /**
+     * Log warning message
+     *
+     * @since 1.0.0
+     * @param string $message Warning message
+     */
+    private function log_warning($message)
+    {
+        if (function_exists('chatshop_log')) {
+            chatshop_log($message, 'warning');
+        } else {
+            error_log("ChatShop Component Loader WARNING: {$message}");
         }
     }
 }

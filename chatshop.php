@@ -494,6 +494,20 @@ final class ChatShop
                 chatshop_log('Payment manager component failed to load', 'warning');
             }
 
+            // Log analytics component status specifically
+            if ($this->analytics) {
+                chatshop_log('Analytics component loaded successfully', 'info');
+            } else {
+                chatshop_log('Analytics component not loaded - checking premium status', 'info');
+
+                // Check why analytics didn't load
+                $is_premium = chatshop_is_premium();
+                $analytics_enabled = chatshop_get_option('analytics', 'enabled', true);
+
+                chatshop_log('Premium status: ' . ($is_premium ? 'true' : 'false'), 'info');
+                chatshop_log('Analytics enabled: ' . ($analytics_enabled ? 'true' : 'false'), 'info');
+            }
+
             chatshop_log('Components loaded successfully', 'info');
         } catch (Exception $e) {
             chatshop_log('Component loading failed: ' . $e->getMessage(), 'error');
@@ -585,6 +599,11 @@ final class ChatShop
      */
     public function get_analytics()
     {
+        // Try to get from component loader if not already loaded
+        if (!$this->analytics && $this->component_loader) {
+            $this->analytics = $this->component_loader->get_component_instance('analytics');
+        }
+
         return $this->analytics;
     }
 
