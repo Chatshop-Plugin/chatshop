@@ -1,10 +1,12 @@
 <?php
 
 /**
- * Contact Manager Component
+ * ChatShop Contact Manager Component
  *
- * Handles contact management with freemium features including import/export,
- * contact limits, and comprehensive contact operations.
+ * File: components/whatsapp/class-chatshop-contact-manager.php
+ * 
+ * Manages WhatsApp contacts with import/export capabilities,
+ * segmentation, and integration with WhatsApp Business API.
  *
  * @package ChatShop
  * @subpackage Components\WhatsApp
@@ -21,15 +23,15 @@ if (!defined('ABSPATH')) {
 /**
  * ChatShop Contact Manager Class
  *
- * Manages contacts with freemium limitations, import/export functionality,
- * and integration with WhatsApp messaging system.
+ * Handles contact management functionality including CRUD operations,
+ * import/export, segmentation, and WhatsApp integration.
  *
  * @since 1.0.0
  */
 class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
 {
     /**
-     * Component ID
+     * Component identifier
      *
      * @var string
      * @since 1.0.0
@@ -37,28 +39,49 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
     protected $id = 'contact_manager';
 
     /**
-     * Free plan contact limit per month
-     *
-     * @var int
-     * @since 1.0.0
-     */
-    private $free_contact_limit = 20;
-
-    /**
-     * Database table name
+     * Component name
      *
      * @var string
      * @since 1.0.0
      */
-    private $table_name;
+    protected $name = 'Contact Management';
 
     /**
-     * Import/Export handler
+     * Component description
      *
-     * @var ChatShop_Contact_Import_Export
+     * @var string
      * @since 1.0.0
      */
-    private $import_export;
+    protected $description = 'Manage WhatsApp contacts with import/export capabilities';
+
+    /**
+     * Database table names
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $tables = array();
+
+    /**
+     * Contact statuses
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $contact_statuses = array(
+        'active' => 'Active',
+        'inactive' => 'Inactive',
+        'blocked' => 'Blocked',
+        'unsubscribed' => 'Unsubscribed'
+    );
+
+    /**
+     * Maximum contacts for free version
+     *
+     * @var int
+     * @since 1.0.0
+     */
+    private $free_contact_limit = 100;
 
     /**
      * Initialize component
@@ -67,24 +90,37 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     protected function init()
     {
-        global $wpdb;
-
-        $this->name = __('Contact Manager', 'chatshop');
-        $this->description = __('Manage WhatsApp contacts with import/export capabilities', 'chatshop');
-        $this->version = '1.0.0';
-        $this->table_name = $wpdb->prefix . 'chatshop_contacts';
-
+        $this->setup_database_tables();
         $this->init_hooks();
-        $this->load_dependencies();
+
+        chatshop_log('Contact Manager component initialized', 'info');
     }
 
     /**
-     * Initialize hooks
+     * Setup database table names
+     *
+     * @since 1.0.0
+     */
+    private function setup_database_tables()
+    {
+        global $wpdb;
+
+        $this->tables = array(
+            'contacts' => $wpdb->prefix . 'chatshop_contacts',
+            'contact_groups' => $wpdb->prefix . 'chatshop_contact_groups',
+            'contact_group_relations' => $wpdb->prefix . 'chatshop_contact_group_relations',
+            'contact_interactions' => $wpdb->prefix . 'chatshop_contact_interactions'
+        );
+    }
+
+    /**
+     * Initialize WordPress hooks
      *
      * @since 1.0.0
      */
     private function init_hooks()
     {
+        // AJAX handlers
         add_action('wp_ajax_chatshop_add_contact', array($this, 'ajax_add_contact'));
         add_action('wp_ajax_chatshop_update_contact', array($this, 'ajax_update_contact'));
         add_action('wp_ajax_chatshop_delete_contact', array($this, 'ajax_delete_contact'));
@@ -92,360 +128,441 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
         add_action('wp_ajax_chatshop_import_contacts', array($this, 'ajax_import_contacts'));
         add_action('wp_ajax_chatshop_export_contacts', array($this, 'ajax_export_contacts'));
         add_action('wp_ajax_chatshop_get_contact_stats', array($this, 'ajax_get_contact_stats'));
-    }
+        add_action('wp_ajax_chatshop_search_contacts', array($this, 'ajax_search_contacts'));
 
-    /**
-     * Load component dependencies
-     *
-     * @since 1.0.0
-     */
-    private function load_dependencies()
-    {
-        require_once CHATSHOP_PLUGIN_DIR . 'components/whatsapp/class-chatshop-contact-import-export.php';
+        // WhatsApp integration hooks
+        add_action('chatshop_whatsapp_message_received', array($this, 'handle_incoming_message'), 10, 2);
+        add_action('chatshop_whatsapp_status_update', array($this, 'handle_status_update'), 10, 2);
 
-        if (class_exists('ChatShop\ChatShop_Contact_Import_Export')) {
-            $this->import_export = new ChatShop_Contact_Import_Export($this);
+        // Scheduled tasks
+        add_action('chatshop_daily_contact_cleanup', array($this, 'cleanup_inactive_contacts'));
+
+        // Schedule cleanup if not already scheduled
+        if (!wp_next_scheduled('chatshop_daily_contact_cleanup')) {
+            wp_schedule_event(time(), 'daily', 'chatshop_daily_contact_cleanup');
         }
     }
 
     /**
-     * Component activation
+     * Component activation handler
      *
      * @since 1.0.0
-     * @return bool Activation result
+     * @return bool True on successful activation
      */
     protected function do_activation()
     {
-        return $this->create_database_table();
+        return $this->create_database_tables();
     }
 
     /**
-     * Component deactivation
+     * Component deactivation handler
      *
      * @since 1.0.0
-     * @return bool Deactivation result
+     * @return bool True on successful deactivation
      */
     protected function do_deactivation()
     {
-        // Keep data on deactivation, only remove on uninstall
+        // Clear scheduled events
+        wp_clear_scheduled_hook('chatshop_daily_contact_cleanup');
+
         return true;
     }
 
     /**
-     * Create database table
+     * Create database tables for contact management
      *
      * @since 1.0.0
-     * @return bool Creation result
+     * @return bool True if tables created successfully
      */
-    private function create_database_table()
+    private function create_database_tables()
     {
         global $wpdb;
 
         $charset_collate = $wpdb->get_charset_collate();
 
-        $sql = "CREATE TABLE {$this->table_name} (
-            id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+        // Contacts table
+        $contacts_table = "CREATE TABLE {$this->tables['contacts']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
             phone varchar(20) NOT NULL,
             name varchar(100) NOT NULL,
-            email varchar(100) DEFAULT '',
-            status enum('active','inactive','blocked') DEFAULT 'active',
-            opt_in_status enum('opted_in','opted_out','pending') DEFAULT 'pending',
-            tags text DEFAULT '',
-            notes text DEFAULT '',
-            last_contacted datetime DEFAULT NULL,
-            contact_count int(11) DEFAULT 0,
-            created_by bigint(20) unsigned DEFAULT NULL,
+            email varchar(100),
+            tags text,
+            notes text,
+            status varchar(20) DEFAULT 'active',
+            last_contacted datetime,
+            last_seen datetime,
+            opt_in_status tinyint(1) DEFAULT 1,
+            source varchar(50),
+            user_id bigint(20),
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
-            UNIQUE KEY phone (phone),
-            KEY email (email),
+            UNIQUE KEY unique_phone (phone),
             KEY status (status),
-            KEY opt_in_status (opt_in_status),
+            KEY last_contacted (last_contacted),
+            KEY user_id (user_id),
+            KEY created_at (created_at)
+        ) $charset_collate;";
+
+        // Contact groups table
+        $groups_table = "CREATE TABLE {$this->tables['contact_groups']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            name varchar(100) NOT NULL,
+            description text,
+            color varchar(7) DEFAULT '#007cba',
+            contact_count int(11) DEFAULT 0,
+            created_by bigint(20),
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
             KEY created_by (created_by),
             KEY created_at (created_at)
         ) $charset_collate;";
 
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        // Contact group relations table
+        $relations_table = "CREATE TABLE {$this->tables['contact_group_relations']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            contact_id bigint(20) NOT NULL,
+            group_id bigint(20) NOT NULL,
+            added_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY unique_relation (contact_id, group_id),
+            KEY contact_id (contact_id),
+            KEY group_id (group_id),
+            FOREIGN KEY (contact_id) REFERENCES {$this->tables['contacts']}(id) ON DELETE CASCADE,
+            FOREIGN KEY (group_id) REFERENCES {$this->tables['contact_groups']}(id) ON DELETE CASCADE
+        ) $charset_collate;";
 
-        $result = dbDelta($sql);
+        // Contact interactions table
+        $interactions_table = "CREATE TABLE {$this->tables['contact_interactions']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            contact_id bigint(20) NOT NULL,
+            interaction_type varchar(50) NOT NULL,
+            message_id varchar(100),
+            content text,
+            direction varchar(10) DEFAULT 'outbound',
+            status varchar(20),
+            metadata longtext,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY contact_id (contact_id),
+            KEY interaction_type (interaction_type),
+            KEY direction (direction),
+            KEY created_at (created_at),
+            FOREIGN KEY (contact_id) REFERENCES {$this->tables['contacts']}(id) ON DELETE CASCADE
+        ) $charset_collate;";
 
-        if ($result) {
-            chatshop_log('Contact manager database table created successfully', 'info');
-            return true;
-        } else {
-            chatshop_log('Failed to create contact manager database table', 'error');
-            return false;
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+
+        $results = array(
+            dbDelta($contacts_table),
+            dbDelta($groups_table),
+            dbDelta($relations_table),
+            dbDelta($interactions_table)
+        );
+
+        // Create default groups
+        $this->create_default_groups();
+
+        chatshop_log('Contact Manager database tables created', 'info', array('results' => $results));
+
+        return true;
+    }
+
+    /**
+     * Create default contact groups
+     *
+     * @since 1.0.0
+     */
+    private function create_default_groups()
+    {
+        $default_groups = array(
+            array(
+                'name' => __('All Contacts', 'chatshop'),
+                'description' => __('Default group for all contacts', 'chatshop'),
+                'color' => '#007cba'
+            ),
+            array(
+                'name' => __('Customers', 'chatshop'),
+                'description' => __('Contacts who have made purchases', 'chatshop'),
+                'color' => '#46b450'
+            ),
+            array(
+                'name' => __('Leads', 'chatshop'),
+                'description' => __('Potential customers', 'chatshop'),
+                'color' => '#ffb900'
+            ),
+            array(
+                'name' => __('VIP', 'chatshop'),
+                'description' => __('High value customers', 'chatshop'),
+                'color' => '#dc3232'
+            )
+        );
+
+        foreach ($default_groups as $group) {
+            $this->create_group($group);
         }
     }
 
     /**
-     * Add new contact
+     * Add a new contact
      *
      * @since 1.0.0
-     * @param array $contact_data Contact information
-     * @return array Result with contact ID or error
+     * @param array $contact_data Contact data
+     * @return int|false Contact ID or false on failure
      */
     public function add_contact($contact_data)
     {
-        // Validate required fields
-        if (empty($contact_data['phone']) || empty($contact_data['name'])) {
-            return array(
-                'success' => false,
-                'message' => __('Phone number and name are required.', 'chatshop')
-            );
-        }
-
-        // Check free plan limits
-        if (!$this->can_add_contact()) {
-            return array(
-                'success' => false,
-                'message' => __('Contact limit reached. Upgrade to premium for unlimited contacts.', 'chatshop')
-            );
-        }
-
-        // Sanitize data
-        $phone = $this->sanitize_phone($contact_data['phone']);
-        $name = sanitize_text_field($contact_data['name']);
-        $email = sanitize_email($contact_data['email'] ?? '');
-        $tags = sanitize_text_field($contact_data['tags'] ?? '');
-        $notes = sanitize_textarea_field($contact_data['notes'] ?? '');
-        $status = in_array($contact_data['status'] ?? 'active', array('active', 'inactive', 'blocked'))
-            ? $contact_data['status'] : 'active';
-
-        // Check if contact already exists
-        if ($this->contact_exists($phone)) {
-            return array(
-                'success' => false,
-                'message' => __('Contact with this phone number already exists.', 'chatshop')
-            );
-        }
-
         global $wpdb;
 
-        $result = $wpdb->insert(
-            $this->table_name,
-            array(
-                'phone' => $phone,
-                'name' => $name,
-                'email' => $email,
-                'status' => $status,
-                'tags' => $tags,
-                'notes' => $notes,
-                'created_by' => get_current_user_id(),
-                'created_at' => current_time('mysql')
-            ),
-            array('%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s')
+        // Check contact limit for free version
+        if (!chatshop_is_premium() && $this->get_contact_count() >= $this->free_contact_limit) {
+            return new \WP_Error(
+                'contact_limit_exceeded',
+                __('Contact limit exceeded. Upgrade to premium for unlimited contacts.', 'chatshop')
+            );
+        }
+
+        // Validate required fields
+        if (empty($contact_data['phone']) || empty($contact_data['name'])) {
+            return new \WP_Error(
+                'missing_required_fields',
+                __('Phone number and name are required.', 'chatshop')
+            );
+        }
+
+        // Sanitize phone number
+        $phone = chatshop_sanitize_phone($contact_data['phone']);
+        if (!chatshop_validate_phone($phone)) {
+            return new \WP_Error(
+                'invalid_phone',
+                __('Invalid phone number format.', 'chatshop')
+            );
+        }
+
+        // Check for duplicates
+        if ($this->contact_exists($phone)) {
+            return new \WP_Error(
+                'contact_exists',
+                __('A contact with this phone number already exists.', 'chatshop')
+            );
+        }
+
+        $contact_data = wp_parse_args($contact_data, array(
+            'phone' => $phone,
+            'name' => '',
+            'email' => '',
+            'tags' => '',
+            'notes' => '',
+            'status' => 'active',
+            'opt_in_status' => 1,
+            'source' => 'manual',
+            'user_id' => get_current_user_id()
+        ));
+
+        // Sanitize data
+        $sanitized_data = array(
+            'phone' => $phone,
+            'name' => sanitize_text_field($contact_data['name']),
+            'email' => sanitize_email($contact_data['email']),
+            'tags' => sanitize_textarea_field($contact_data['tags']),
+            'notes' => sanitize_textarea_field($contact_data['notes']),
+            'status' => sanitize_key($contact_data['status']),
+            'opt_in_status' => intval($contact_data['opt_in_status']),
+            'source' => sanitize_key($contact_data['source']),
+            'user_id' => intval($contact_data['user_id']),
+            'created_at' => current_time('mysql'),
+            'updated_at' => current_time('mysql')
         );
+
+        $result = $wpdb->insert($this->tables['contacts'], $sanitized_data);
 
         if ($result) {
             $contact_id = $wpdb->insert_id;
 
-            chatshop_log("Contact added successfully: {$name} ({$phone})", 'info', array(
-                'contact_id' => $contact_id,
-                'user_id' => get_current_user_id()
+            // Add to default group
+            $this->add_contact_to_group($contact_id, 1); // Assuming group ID 1 is "All Contacts"
+
+            // Track the event
+            do_action('chatshop_contact_added', $contact_id, $sanitized_data);
+
+            chatshop_log("Contact added: {$sanitized_data['name']} ({$phone})", 'info', array(
+                'contact_id' => $contact_id
             ));
 
-            return array(
-                'success' => true,
-                'contact_id' => $contact_id,
-                'message' => __('Contact added successfully.', 'chatshop')
-            );
-        } else {
-            chatshop_log("Failed to add contact: {$name} ({$phone})", 'error', array(
-                'db_error' => $wpdb->last_error
-            ));
-
-            return array(
-                'success' => false,
-                'message' => __('Failed to add contact. Please try again.', 'chatshop')
-            );
+            return $contact_id;
         }
+
+        chatshop_log("Failed to add contact: {$contact_data['name']}", 'error', array(
+            'error' => $wpdb->last_error
+        ));
+
+        return false;
     }
 
     /**
-     * Update existing contact
+     * Update an existing contact
      *
      * @since 1.0.0
-     * @param int   $contact_id Contact ID
-     * @param array $contact_data Updated contact information
-     * @return array Result with success status
+     * @param int $contact_id Contact ID
+     * @param array $contact_data Updated contact data
+     * @return bool True on success, false on failure
      */
     public function update_contact($contact_id, $contact_data)
     {
-        $contact_id = absint($contact_id);
+        global $wpdb;
 
-        if (!$contact_id || !$this->contact_exists_by_id($contact_id)) {
-            return array(
-                'success' => false,
-                'message' => __('Contact not found.', 'chatshop')
-            );
+        $contact_id = intval($contact_id);
+
+        if (!$this->contact_exists_by_id($contact_id)) {
+            return false;
+        }
+
+        // Sanitize phone if provided
+        if (!empty($contact_data['phone'])) {
+            $phone = chatshop_sanitize_phone($contact_data['phone']);
+            if (!chatshop_validate_phone($phone)) {
+                return new \WP_Error(
+                    'invalid_phone',
+                    __('Invalid phone number format.', 'chatshop')
+                );
+            }
+            $contact_data['phone'] = $phone;
         }
 
         // Prepare update data
         $update_data = array();
-        $format = array();
+        $allowed_fields = array('phone', 'name', 'email', 'tags', 'notes', 'status', 'opt_in_status', 'last_seen');
 
-        if (!empty($contact_data['name'])) {
-            $update_data['name'] = sanitize_text_field($contact_data['name']);
-            $format[] = '%s';
-        }
-
-        if (isset($contact_data['email'])) {
-            $update_data['email'] = sanitize_email($contact_data['email']);
-            $format[] = '%s';
-        }
-
-        if (isset($contact_data['status']) && in_array($contact_data['status'], array('active', 'inactive', 'blocked'))) {
-            $update_data['status'] = $contact_data['status'];
-            $format[] = '%s';
-        }
-
-        if (isset($contact_data['opt_in_status']) && in_array($contact_data['opt_in_status'], array('opted_in', 'opted_out', 'pending'))) {
-            $update_data['opt_in_status'] = $contact_data['opt_in_status'];
-            $format[] = '%s';
-        }
-
-        if (isset($contact_data['tags'])) {
-            $update_data['tags'] = sanitize_text_field($contact_data['tags']);
-            $format[] = '%s';
-        }
-
-        if (isset($contact_data['notes'])) {
-            $update_data['notes'] = sanitize_textarea_field($contact_data['notes']);
-            $format[] = '%s';
-        }
-
-        if (empty($update_data)) {
-            return array(
-                'success' => false,
-                'message' => __('No valid data provided for update.', 'chatshop')
-            );
+        foreach ($allowed_fields as $field) {
+            if (isset($contact_data[$field])) {
+                switch ($field) {
+                    case 'name':
+                        $update_data[$field] = sanitize_text_field($contact_data[$field]);
+                        break;
+                    case 'email':
+                        $update_data[$field] = sanitize_email($contact_data[$field]);
+                        break;
+                    case 'tags':
+                    case 'notes':
+                        $update_data[$field] = sanitize_textarea_field($contact_data[$field]);
+                        break;
+                    case 'status':
+                        $update_data[$field] = sanitize_key($contact_data[$field]);
+                        break;
+                    case 'opt_in_status':
+                        $update_data[$field] = intval($contact_data[$field]);
+                        break;
+                    case 'last_seen':
+                        $update_data[$field] = $contact_data[$field];
+                        break;
+                    default:
+                        $update_data[$field] = sanitize_text_field($contact_data[$field]);
+                }
+            }
         }
 
         $update_data['updated_at'] = current_time('mysql');
-        $format[] = '%s';
-
-        global $wpdb;
 
         $result = $wpdb->update(
-            $this->table_name,
+            $this->tables['contacts'],
             $update_data,
             array('id' => $contact_id),
-            $format,
+            null,
             array('%d')
         );
 
         if ($result !== false) {
-            chatshop_log("Contact updated successfully: ID {$contact_id}", 'info', array(
-                'contact_id' => $contact_id,
-                'updated_fields' => array_keys($update_data)
-            ));
+            do_action('chatshop_contact_updated', $contact_id, $update_data);
 
-            return array(
-                'success' => true,
-                'message' => __('Contact updated successfully.', 'chatshop')
-            );
-        } else {
-            chatshop_log("Failed to update contact: ID {$contact_id}", 'error', array(
-                'contact_id' => $contact_id,
-                'db_error' => $wpdb->last_error
-            ));
-
-            return array(
-                'success' => false,
-                'message' => __('Failed to update contact. Please try again.', 'chatshop')
-            );
+            chatshop_log("Contact updated: ID {$contact_id}", 'info');
+            return true;
         }
+
+        chatshop_log("Failed to update contact: ID {$contact_id}", 'error', array(
+            'error' => $wpdb->last_error
+        ));
+
+        return false;
     }
 
     /**
-     * Delete contact
+     * Delete a contact
      *
      * @since 1.0.0
      * @param int $contact_id Contact ID
-     * @return array Result with success status
+     * @return bool True on success, false on failure
      */
     public function delete_contact($contact_id)
     {
-        $contact_id = absint($contact_id);
-
-        if (!$contact_id || !$this->contact_exists_by_id($contact_id)) {
-            return array(
-                'success' => false,
-                'message' => __('Contact not found.', 'chatshop')
-            );
-        }
-
         global $wpdb;
 
+        $contact_id = intval($contact_id);
+
+        if (!$this->contact_exists_by_id($contact_id)) {
+            return false;
+        }
+
+        // Get contact data before deletion for logging
+        $contact = $this->get_contact($contact_id);
+
         $result = $wpdb->delete(
-            $this->table_name,
+            $this->tables['contacts'],
             array('id' => $contact_id),
             array('%d')
         );
 
         if ($result) {
-            chatshop_log("Contact deleted successfully: ID {$contact_id}", 'info', array(
-                'contact_id' => $contact_id,
-                'user_id' => get_current_user_id()
+            do_action('chatshop_contact_deleted', $contact_id, $contact);
+
+            chatshop_log("Contact deleted: {$contact->name} ({$contact->phone})", 'info', array(
+                'contact_id' => $contact_id
             ));
 
-            return array(
-                'success' => true,
-                'message' => __('Contact deleted successfully.', 'chatshop')
-            );
-        } else {
-            chatshop_log("Failed to delete contact: ID {$contact_id}", 'error', array(
-                'contact_id' => $contact_id,
-                'db_error' => $wpdb->last_error
-            ));
-
-            return array(
-                'success' => false,
-                'message' => __('Failed to delete contact. Please try again.', 'chatshop')
-            );
+            return true;
         }
+
+        chatshop_log("Failed to delete contact: ID {$contact_id}", 'error', array(
+            'error' => $wpdb->last_error
+        ));
+
+        return false;
     }
 
     /**
-     * Get contact by ID
+     * Get a contact by ID
      *
      * @since 1.0.0
      * @param int $contact_id Contact ID
-     * @return array|null Contact data or null if not found
+     * @return object|null Contact object or null if not found
      */
     public function get_contact($contact_id)
     {
         global $wpdb;
 
-        $contact = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM {$this->table_name} WHERE id = %d",
-            absint($contact_id)
-        ), ARRAY_A);
-
-        return $contact ?: null;
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$this->tables['contacts']} WHERE id = %d",
+            $contact_id
+        ));
     }
 
     /**
-     * Get contact by phone number
+     * Get a contact by phone number
      *
      * @since 1.0.0
      * @param string $phone Phone number
-     * @return array|null Contact data or null if not found
+     * @return object|null Contact object or null if not found
      */
     public function get_contact_by_phone($phone)
     {
         global $wpdb;
 
-        $phone = $this->sanitize_phone($phone);
+        $phone = chatshop_sanitize_phone($phone);
 
-        $contact = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM {$this->table_name} WHERE phone = %s",
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$this->tables['contacts']} WHERE phone = %s",
             $phone
-        ), ARRAY_A);
-
-        return $contact ?: null;
+        ));
     }
 
     /**
@@ -453,80 +570,148 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      *
      * @since 1.0.0
      * @param array $args Query arguments
-     * @return array Contacts data with pagination info
+     * @return array Contacts and pagination info
      */
     public function get_contacts($args = array())
     {
         global $wpdb;
 
         $defaults = array(
-            'limit' => 20,
-            'offset' => 0,
-            'status' => '',
-            'opt_in_status' => '',
+            'per_page' => 20,
+            'page' => 1,
             'search' => '',
-            'tags' => '',
-            'orderby' => 'created_at',
+            'status' => '',
+            'group_id' => 0,
+            'order_by' => 'created_at',
             'order' => 'DESC'
         );
 
         $args = wp_parse_args($args, $defaults);
 
         // Build WHERE clause
-        $where_conditions = array('1=1');
+        $where_conditions = array();
         $where_values = array();
+
+        if (!empty($args['search'])) {
+            $search = '%' . $wpdb->esc_like($args['search']) . '%';
+            $where_conditions[] = "(name LIKE %s OR phone LIKE %s OR email LIKE %s)";
+            $where_values[] = $search;
+            $where_values[] = $search;
+            $where_values[] = $search;
+        }
 
         if (!empty($args['status'])) {
             $where_conditions[] = "status = %s";
             $where_values[] = $args['status'];
         }
 
-        if (!empty($args['opt_in_status'])) {
-            $where_conditions[] = "opt_in_status = %s";
-            $where_values[] = $args['opt_in_status'];
+        $where_clause = '';
+        if (!empty($where_conditions)) {
+            $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
         }
 
-        if (!empty($args['search'])) {
-            $where_conditions[] = "(name LIKE %s OR phone LIKE %s OR email LIKE %s)";
-            $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
-            $where_values[] = $search_term;
-            $where_values[] = $search_term;
-            $where_values[] = $search_term;
+        // Handle group filtering
+        $join_clause = '';
+        if (!empty($args['group_id'])) {
+            $join_clause = "INNER JOIN {$this->tables['contact_group_relations']} cgr ON c.id = cgr.contact_id";
+            $where_conditions[] = "cgr.group_id = %d";
+            $where_values[] = intval($args['group_id']);
+
+            if (!empty($where_conditions)) {
+                $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+            }
         }
 
-        if (!empty($args['tags'])) {
-            $where_conditions[] = "tags LIKE %s";
-            $where_values[] = '%' . $wpdb->esc_like($args['tags']) . '%';
+        // Validate order by
+        $allowed_order_by = array('id', 'name', 'phone', 'status', 'created_at', 'updated_at', 'last_contacted');
+        if (!in_array($args['order_by'], $allowed_order_by)) {
+            $args['order_by'] = 'created_at';
         }
 
-        $where_clause = implode(' AND ', $where_conditions);
-
-        // Build ORDER BY clause
-        $allowed_orderby = array('id', 'name', 'phone', 'status', 'created_at', 'updated_at');
-        $orderby = in_array($args['orderby'], $allowed_orderby) ? $args['orderby'] : 'created_at';
-        $order = strtoupper($args['order']) === 'ASC' ? 'ASC' : 'DESC';
+        $order_by = sanitize_sql_orderby($args['order_by'] . ' ' . $args['order']);
 
         // Get total count
-        $count_sql = "SELECT COUNT(*) FROM {$this->table_name} WHERE {$where_clause}";
-        $total_contacts = $wpdb->get_var($wpdb->prepare($count_sql, $where_values));
+        $count_query = "SELECT COUNT(DISTINCT c.id) FROM {$this->tables['contacts']} c {$join_clause} {$where_clause}";
+        $total_contacts = $wpdb->get_var($wpdb->prepare($count_query, $where_values));
 
         // Get contacts
-        $contacts_sql = "SELECT * FROM {$this->table_name} WHERE {$where_clause} 
-                        ORDER BY {$orderby} {$order} 
-                        LIMIT %d OFFSET %d";
+        $offset = ($args['page'] - 1) * $args['per_page'];
+        $limit = intval($args['per_page']);
 
-        $where_values[] = absint($args['limit']);
-        $where_values[] = absint($args['offset']);
+        $contacts_query = "
+            SELECT DISTINCT c.* 
+            FROM {$this->tables['contacts']} c 
+            {$join_clause} 
+            {$where_clause} 
+            ORDER BY {$order_by} 
+            LIMIT {$offset}, {$limit}
+        ";
 
-        $contacts = $wpdb->get_results($wpdb->prepare($contacts_sql, $where_values), ARRAY_A);
+        $contacts = $wpdb->get_results($wpdb->prepare($contacts_query, $where_values));
+
+        // Calculate pagination
+        $total_pages = ceil($total_contacts / $args['per_page']);
 
         return array(
-            'contacts' => $contacts ?: array(),
-            'total' => (int) $total_contacts,
-            'limit' => absint($args['limit']),
-            'offset' => absint($args['offset']),
-            'pages' => ceil($total_contacts / $args['limit'])
+            'contacts' => $contacts,
+            'total' => intval($total_contacts),
+            'pages' => intval($total_pages),
+            'current_page' => intval($args['page']),
+            'per_page' => intval($args['per_page'])
         );
+    }
+
+    /**
+     * Check if contact exists by phone
+     *
+     * @since 1.0.0
+     * @param string $phone Phone number
+     * @return bool True if exists, false otherwise
+     */
+    public function contact_exists($phone)
+    {
+        global $wpdb;
+
+        $phone = chatshop_sanitize_phone($phone);
+
+        $count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->tables['contacts']} WHERE phone = %s",
+            $phone
+        ));
+
+        return intval($count) > 0;
+    }
+
+    /**
+     * Check if contact exists by ID
+     *
+     * @since 1.0.0
+     * @param int $contact_id Contact ID
+     * @return bool True if exists, false otherwise
+     */
+    public function contact_exists_by_id($contact_id)
+    {
+        global $wpdb;
+
+        $count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->tables['contacts']} WHERE id = %d",
+            $contact_id
+        ));
+
+        return intval($count) > 0;
+    }
+
+    /**
+     * Get total contact count
+     *
+     * @since 1.0.0
+     * @return int Total contact count
+     */
+    public function get_contact_count()
+    {
+        global $wpdb;
+
+        return intval($wpdb->get_var("SELECT COUNT(*) FROM {$this->tables['contacts']}"));
     }
 
     /**
@@ -539,68 +724,115 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
     {
         global $wpdb;
 
-        $stats = array();
+        $stats = array(
+            'total' => 0,
+            'active' => 0,
+            'inactive' => 0,
+            'blocked' => 0,
+            'unsubscribed' => 0,
+            'recent' => 0, // Added in last 7 days
+            'limit_reached' => false
+        );
 
-        // Total contacts
-        $stats['total'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$this->table_name}");
+        // Get counts by status
+        $status_counts = $wpdb->get_results(
+            "SELECT status, COUNT(*) as count FROM {$this->tables['contacts']} GROUP BY status",
+            ARRAY_A
+        );
 
-        // Active contacts
-        $stats['active'] = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE status = %s",
-            'active'
+        foreach ($status_counts as $status_count) {
+            $status = $status_count['status'];
+            $count = intval($status_count['count']);
+
+            if (isset($stats[$status])) {
+                $stats[$status] = $count;
+            }
+
+            $stats['total'] += $count;
+        }
+
+        // Get recent contacts (last 7 days)
+        $stats['recent'] = intval($wpdb->get_var(
+            "SELECT COUNT(*) FROM {$this->tables['contacts']} 
+             WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
         ));
 
-        // Opted in contacts
-        $stats['opted_in'] = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE opt_in_status = %s",
-            'opted_in'
-        ));
-
-        // Contacts added this month
-        $stats['this_month'] = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} 
-             WHERE YEAR(created_at) = %d AND MONTH(created_at) = %d",
-            date('Y'),
-            date('n')
-        ));
-
-        // Free plan usage
-        $stats['monthly_limit'] = $this->free_contact_limit;
-        $stats['monthly_usage'] = $stats['this_month'];
-        $stats['can_add_more'] = $this->can_add_contact();
-        $stats['is_premium'] = chatshop_is_premium_feature_available('unlimited_contacts');
+        // Check if limit reached for free version
+        if (!chatshop_is_premium()) {
+            $stats['limit_reached'] = $stats['total'] >= $this->free_contact_limit;
+        }
 
         return $stats;
     }
 
     /**
-     * Update opt-in status for contact
+     * Create a contact group
      *
      * @since 1.0.0
-     * @param string $phone Phone number
-     * @param bool   $opted_in Opt-in status
-     * @return bool Update result
+     * @param array $group_data Group data
+     * @return int|false Group ID or false on failure
      */
-    public function update_opt_in_status($phone, $opted_in)
+    public function create_group($group_data)
     {
         global $wpdb;
 
-        $phone = $this->sanitize_phone($phone);
-        $opt_in_status = $opted_in ? 'opted_in' : 'opted_out';
+        $group_data = wp_parse_args($group_data, array(
+            'name' => '',
+            'description' => '',
+            'color' => '#007cba',
+            'created_by' => get_current_user_id()
+        ));
 
-        $result = $wpdb->update(
-            $this->table_name,
-            array(
-                'opt_in_status' => $opt_in_status,
-                'updated_at' => current_time('mysql')
-            ),
-            array('phone' => $phone),
-            array('%s', '%s'),
-            array('%s')
+        if (empty($group_data['name'])) {
+            return false;
+        }
+
+        $sanitized_data = array(
+            'name' => sanitize_text_field($group_data['name']),
+            'description' => sanitize_textarea_field($group_data['description']),
+            'color' => sanitize_hex_color($group_data['color']),
+            'created_by' => intval($group_data['created_by']),
+            'created_at' => current_time('mysql')
         );
 
-        if ($result !== false) {
-            chatshop_log("Contact opt-in status updated: {$phone} -> {$opt_in_status}", 'info');
+        $result = $wpdb->insert($this->tables['contact_groups'], $sanitized_data);
+
+        if ($result) {
+            $group_id = $wpdb->insert_id;
+            chatshop_log("Contact group created: {$sanitized_data['name']}", 'info', array(
+                'group_id' => $group_id
+            ));
+            return $group_id;
+        }
+
+        return false;
+    }
+
+    /**
+     * Add contact to group
+     *
+     * @since 1.0.0
+     * @param int $contact_id Contact ID
+     * @param int $group_id Group ID
+     * @return bool True on success, false on failure
+     */
+    public function add_contact_to_group($contact_id, $group_id)
+    {
+        global $wpdb;
+
+        $result = $wpdb->insert(
+            $this->tables['contact_group_relations'],
+            array(
+                'contact_id' => intval($contact_id),
+                'group_id' => intval($group_id),
+                'added_at' => current_time('mysql')
+            ),
+            array('%d', '%d', '%s')
+        );
+
+        if ($result) {
+            // Update group contact count
+            $this->update_group_contact_count($group_id);
             return true;
         }
 
@@ -608,130 +840,448 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
     }
 
     /**
-     * Update last contacted timestamp
+     * Update group contact count
      *
      * @since 1.0.0
-     * @param string $phone Phone number
-     * @return bool Update result
+     * @param int $group_id Group ID
      */
-    public function update_last_contacted($phone)
-    {
-        global $wpdb;
-
-        $phone = $this->sanitize_phone($phone);
-
-        $result = $wpdb->query($wpdb->prepare(
-            "UPDATE {$this->table_name} 
-             SET last_contacted = %s, 
-                 contact_count = contact_count + 1,
-                 updated_at = %s 
-             WHERE phone = %s",
-            current_time('mysql'),
-            current_time('mysql'),
-            $phone
-        ));
-
-        return $result !== false;
-    }
-
-    /**
-     * Check if contact can be added (free plan limit)
-     *
-     * @since 1.0.0
-     * @return bool Whether contact can be added
-     */
-    public function can_add_contact()
-    {
-        // Premium users have unlimited contacts
-        if (chatshop_is_premium_feature_available('unlimited_contacts')) {
-            return true;
-        }
-
-        // Check monthly limit for free users
-        $monthly_count = $this->get_monthly_contact_count();
-
-        return $monthly_count < $this->free_contact_limit;
-    }
-
-    /**
-     * Get monthly contact count
-     *
-     * @since 1.0.0
-     * @return int Number of contacts added this month
-     */
-    public function get_monthly_contact_count()
+    private function update_group_contact_count($group_id)
     {
         global $wpdb;
 
         $count = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} 
-             WHERE YEAR(created_at) = %d AND MONTH(created_at) = %d",
-            date('Y'),
-            date('n')
+            "SELECT COUNT(*) FROM {$this->tables['contact_group_relations']} WHERE group_id = %d",
+            $group_id
         ));
 
-        return (int) $count;
+        $wpdb->update(
+            $this->tables['contact_groups'],
+            array('contact_count' => intval($count)),
+            array('id' => $group_id),
+            array('%d'),
+            array('%d')
+        );
     }
 
     /**
-     * Check if contact exists by phone
-     *
-     * @since 1.0.0
-     * @param string $phone Phone number
-     * @return bool Whether contact exists
-     */
-    private function contact_exists($phone)
-    {
-        global $wpdb;
-
-        $phone = $this->sanitize_phone($phone);
-
-        $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE phone = %s",
-            $phone
-        ));
-
-        return (int) $exists > 0;
-    }
-
-    /**
-     * Check if contact exists by ID
+     * Record contact interaction
      *
      * @since 1.0.0
      * @param int $contact_id Contact ID
-     * @return bool Whether contact exists
+     * @param string $type Interaction type
+     * @param array $data Interaction data
+     * @return int|false Interaction ID or false on failure
      */
-    private function contact_exists_by_id($contact_id)
+    public function record_interaction($contact_id, $type, $data = array())
     {
         global $wpdb;
 
-        $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE id = %d",
-            absint($contact_id)
+        $interaction_data = wp_parse_args($data, array(
+            'message_id' => '',
+            'content' => '',
+            'direction' => 'outbound',
+            'status' => 'sent',
+            'metadata' => array()
         ));
 
-        return (int) $exists > 0;
+        $result = $wpdb->insert(
+            $this->tables['contact_interactions'],
+            array(
+                'contact_id' => intval($contact_id),
+                'interaction_type' => sanitize_key($type),
+                'message_id' => sanitize_text_field($interaction_data['message_id']),
+                'content' => sanitize_textarea_field($interaction_data['content']),
+                'direction' => sanitize_key($interaction_data['direction']),
+                'status' => sanitize_key($interaction_data['status']),
+                'metadata' => wp_json_encode($interaction_data['metadata']),
+                'created_at' => current_time('mysql')
+            ),
+            array('%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s')
+        );
+
+        if ($result) {
+            // Update contact's last_contacted timestamp if outbound
+            if ($interaction_data['direction'] === 'outbound') {
+                $this->update_contact($contact_id, array('last_contacted' => current_time('mysql')));
+            }
+
+            return $wpdb->insert_id;
+        }
+
+        return false;
     }
 
     /**
-     * Sanitize phone number
+     * Handle incoming WhatsApp message
      *
      * @since 1.0.0
-     * @param string $phone Raw phone number
-     * @return string Sanitized phone number
+     * @param array $message_data Message data
+     * @param string $phone Sender phone number
      */
-    private function sanitize_phone($phone)
+    public function handle_incoming_message($message_data, $phone)
     {
-        // Remove all non-numeric characters except +
-        $phone = preg_replace('/[^0-9+]/', '', $phone);
+        $phone = chatshop_sanitize_phone($phone);
 
-        // Ensure phone starts with + for international format
-        if (!empty($phone) && substr($phone, 0, 1) !== '+') {
-            $phone = '+' . $phone;
+        // Get or create contact
+        $contact = $this->get_contact_by_phone($phone);
+
+        if (!$contact) {
+            // Create new contact from incoming message
+            $contact_id = $this->add_contact(array(
+                'phone' => $phone,
+                'name' => $message_data['sender_name'] ?? $phone,
+                'source' => 'whatsapp_incoming'
+            ));
+        } else {
+            $contact_id = $contact->id;
+
+            // Update last seen
+            $this->update_contact($contact_id, array('last_seen' => current_time('mysql')));
         }
 
-        return $phone;
+        if ($contact_id && !is_wp_error($contact_id)) {
+            // Record the interaction
+            $this->record_interaction($contact_id, 'message_received', array(
+                'message_id' => $message_data['id'] ?? '',
+                'content' => $message_data['body'] ?? '',
+                'direction' => 'inbound',
+                'status' => 'received',
+                'metadata' => $message_data
+            ));
+        }
     }
+
+    /**
+     * Handle WhatsApp status update
+     *
+     * @since 1.0.0
+     * @param array $status_data Status data
+     * @param string $phone Contact phone number
+     */
+    public function handle_status_update($status_data, $phone)
+    {
+        $contact = $this->get_contact_by_phone($phone);
+
+        if ($contact) {
+            $this->record_interaction($contact->id, 'status_update', array(
+                'message_id' => $status_data['message_id'] ?? '',
+                'status' => $status_data['status'] ?? '',
+                'direction' => 'system',
+                'metadata' => $status_data
+            ));
+        }
+    }
+
+    /**
+     * Import contacts from CSV data
+     *
+     * @since 1.0.0
+     * @param array $csv_data CSV data
+     * @return array Import results
+     */
+    public function import_contacts($csv_data)
+    {
+        $results = array(
+            'total' => count($csv_data),
+            'imported' => 0,
+            'skipped' => 0,
+            'errors' => array()
+        );
+
+        foreach ($csv_data as $row_index => $row) {
+            try {
+                // Validate required fields
+                if (empty($row['phone']) || empty($row['name'])) {
+                    $results['errors'][] = "Row " . ($row_index + 1) . ": Missing required fields (phone, name)";
+                    continue;
+                }
+
+                // Check if contact already exists
+                if ($this->contact_exists($row['phone'])) {
+                    $results['skipped']++;
+                    continue;
+                }
+
+                // Add the contact
+                $contact_id = $this->add_contact(array(
+                    'phone' => $row['phone'],
+                    'name' => $row['name'],
+                    'email' => $row['email'] ?? '',
+                    'tags' => $row['tags'] ?? '',
+                    'notes' => $row['notes'] ?? '',
+                    'source' => 'csv_import'
+                ));
+
+                if (is_wp_error($contact_id)) {
+                    $results['errors'][] = "Row " . ($row_index + 1) . ": " . $contact_id->get_error_message();
+                } elseif ($contact_id) {
+                    $results['imported']++;
+                }
+            } catch (Exception $e) {
+                $results['errors'][] = "Row " . ($row_index + 1) . ": " . $e->getMessage();
+            }
+        }
+
+        chatshop_log("Contact import completed", 'info', $results);
+
+        return $results;
+    }
+
+    /**
+     * Export contacts to CSV format
+     *
+     * @since 1.0.0
+     * @param array $args Export arguments
+     * @return string|false CSV content or false on failure
+     */
+    public function export_contacts($args = array())
+    {
+        $contacts_data = $this->get_contacts(array(
+            'per_page' => -1, // Get all contacts
+            'status' => $args['status'] ?? '',
+            'group_id' => $args['group_id'] ?? 0
+        ));
+
+        if (empty($contacts_data['contacts'])) {
+            return false;
+        }
+
+        // Create CSV content
+        $csv_content = '';
+        $headers = array('ID', 'Phone', 'Name', 'Email', 'Tags', 'Status', 'Created At');
+
+        // Add headers
+        $csv_content .= implode(',', $headers) . "\n";
+
+        // Add contact data
+        foreach ($contacts_data['contacts'] as $contact) {
+            $row = array(
+                $contact->id,
+                $contact->phone,
+                '"' . str_replace('"', '""', $contact->name) . '"',
+                $contact->email,
+                '"' . str_replace('"', '""', $contact->tags) . '"',
+                $contact->status,
+                $contact->created_at
+            );
+
+            $csv_content .= implode(',', $row) . "\n";
+        }
+
+        return $csv_content;
+    }
+
+    /**
+     * Get contact groups
+     *
+     * @since 1.0.0
+     * @param array $args Query arguments
+     * @return array Contact groups
+     */
+    public function get_groups($args = array())
+    {
+        global $wpdb;
+
+        $defaults = array(
+            'order_by' => 'name',
+            'order' => 'ASC',
+            'include_counts' => true
+        );
+
+        $args = wp_parse_args($args, $defaults);
+
+        $order_by = sanitize_sql_orderby($args['order_by'] . ' ' . $args['order']);
+
+        $query = "SELECT * FROM {$this->tables['contact_groups']} ORDER BY {$order_by}";
+        $groups = $wpdb->get_results($query);
+
+        // Update contact counts if requested
+        if ($args['include_counts']) {
+            foreach ($groups as $group) {
+                $this->update_group_contact_count($group->id);
+            }
+
+            // Re-fetch with updated counts
+            $groups = $wpdb->get_results($query);
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Get contact interactions
+     *
+     * @since 1.0.0
+     * @param int $contact_id Contact ID
+     * @param array $args Query arguments
+     * @return array Contact interactions
+     */
+    public function get_contact_interactions($contact_id, $args = array())
+    {
+        global $wpdb;
+
+        $defaults = array(
+            'limit' => 50,
+            'offset' => 0,
+            'type' => '',
+            'direction' => ''
+        );
+
+        $args = wp_parse_args($args, $defaults);
+
+        $where_conditions = array('contact_id = %d');
+        $where_values = array($contact_id);
+
+        if (!empty($args['type'])) {
+            $where_conditions[] = 'interaction_type = %s';
+            $where_values[] = $args['type'];
+        }
+
+        if (!empty($args['direction'])) {
+            $where_conditions[] = 'direction = %s';
+            $where_values[] = $args['direction'];
+        }
+
+        $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+        $limit = intval($args['limit']);
+        $offset = intval($args['offset']);
+
+        $query = "
+            SELECT * FROM {$this->tables['contact_interactions']} 
+            {$where_clause} 
+            ORDER BY created_at DESC 
+            LIMIT {$offset}, {$limit}
+        ";
+
+        $interactions = $wpdb->get_results($wpdb->prepare($query, $where_values));
+
+        // Decode metadata JSON
+        foreach ($interactions as $interaction) {
+            $interaction->metadata = json_decode($interaction->metadata, true);
+        }
+
+        return $interactions;
+    }
+
+    /**
+     * Search contacts
+     *
+     * @since 1.0.0
+     * @param string $search_term Search term
+     * @param array $args Additional arguments
+     * @return array Search results
+     */
+    public function search_contacts($search_term, $args = array())
+    {
+        $args['search'] = $search_term;
+        return $this->get_contacts($args);
+    }
+
+    /**
+     * Bulk update contacts
+     *
+     * @since 1.0.0
+     * @param array $contact_ids Contact IDs
+     * @param array $update_data Data to update
+     * @return int Number of updated contacts
+     */
+    public function bulk_update_contacts($contact_ids, $update_data)
+    {
+        if (empty($contact_ids) || empty($update_data)) {
+            return 0;
+        }
+
+        $updated_count = 0;
+        foreach ($contact_ids as $contact_id) {
+            if ($this->update_contact($contact_id, $update_data)) {
+                $updated_count++;
+            }
+        }
+
+        chatshop_log("Bulk contact update completed", 'info', array(
+            'updated_count' => $updated_count,
+            'total_requested' => count($contact_ids)
+        ));
+
+        return $updated_count;
+    }
+
+    /**
+     * Cleanup inactive contacts
+     *
+     * @since 1.0.0
+     */
+    public function cleanup_inactive_contacts()
+    {
+        global $wpdb;
+
+        $cleanup_days = chatshop_get_option('contacts', 'cleanup_inactive_days', 365);
+        $cutoff_date = date('Y-m-d', strtotime("-{$cleanup_days} days"));
+
+        // Only cleanup contacts that are inactive and haven't been contacted recently
+        $deleted = $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$this->tables['contacts']} 
+             WHERE status = 'inactive' 
+             AND (last_contacted IS NULL OR last_contacted < %s)
+             AND created_at < %s",
+            $cutoff_date,
+            $cutoff_date
+        ));
+
+        if ($deleted > 0) {
+            chatshop_log("Cleaned up {$deleted} inactive contacts", 'info');
+        }
+    }
+
+    /**
+     * Get component status for admin display
+     *
+     * @since 1.0.0
+     * @return array Component status
+     */
+    public function get_status()
+    {
+        global $wpdb;
+
+        $status = array(
+            'active' => true,
+            'tables_exist' => true,
+            'total_contacts' => 0,
+            'recent_contacts' => 0,
+            'groups_count' => 0,
+            'interactions_count' => 0,
+            'errors' => array()
+        );
+
+        // Check if tables exist
+        foreach ($this->tables as $table_name) {
+            if ($wpdb->get_var("SHOW TABLES LIKE '{$table_name}'") !== $table_name) {
+                $status['tables_exist'] = false;
+                $status['errors'][] = "Table {$table_name} does not exist";
+            }
+        }
+
+        if ($status['tables_exist']) {
+            // Get contact statistics
+            $stats = $this->get_contact_stats();
+            $status['total_contacts'] = $stats['total'];
+            $status['recent_contacts'] = $stats['recent'];
+
+            // Get groups count
+            $status['groups_count'] = intval($wpdb->get_var(
+                "SELECT COUNT(*) FROM {$this->tables['contact_groups']}"
+            ));
+
+            // Get interactions count
+            $status['interactions_count'] = intval($wpdb->get_var(
+                "SELECT COUNT(*) FROM {$this->tables['contact_interactions']}"
+            ));
+        }
+
+        return $status;
+    }
+
+    // AJAX Handlers
 
     /**
      * AJAX handler for adding contact
@@ -740,24 +1290,34 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     public function ajax_add_contact()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
 
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
         }
 
         $contact_data = array(
             'phone' => sanitize_text_field($_POST['phone'] ?? ''),
             'name' => sanitize_text_field($_POST['name'] ?? ''),
             'email' => sanitize_email($_POST['email'] ?? ''),
-            'tags' => sanitize_text_field($_POST['tags'] ?? ''),
-            'notes' => sanitize_textarea_field($_POST['notes'] ?? ''),
-            'status' => sanitize_text_field($_POST['status'] ?? 'active')
+            'tags' => sanitize_textarea_field($_POST['tags'] ?? ''),
+            'notes' => sanitize_textarea_field($_POST['notes'] ?? '')
         );
 
         $result = $this->add_contact($contact_data);
 
-        wp_send_json($result);
+        if (is_wp_error($result)) {
+            wp_send_json_error(array('message' => $result->get_error_message()));
+        } elseif ($result) {
+            wp_send_json_success(array(
+                'contact_id' => $result,
+                'message' => __('Contact added successfully', 'chatshop')
+            ));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to add contact', 'chatshop')));
+        }
     }
 
     /**
@@ -767,24 +1327,32 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     public function ajax_update_contact()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
         }
 
-        $contact_id = absint($_POST['contact_id'] ?? 0);
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $contact_id = intval($_POST['contact_id'] ?? 0);
         $contact_data = array(
             'name' => sanitize_text_field($_POST['name'] ?? ''),
             'email' => sanitize_email($_POST['email'] ?? ''),
-            'tags' => sanitize_text_field($_POST['tags'] ?? ''),
+            'tags' => sanitize_textarea_field($_POST['tags'] ?? ''),
             'notes' => sanitize_textarea_field($_POST['notes'] ?? ''),
-            'status' => sanitize_text_field($_POST['status'] ?? '')
+            'status' => sanitize_key($_POST['status'] ?? '')
         );
 
         $result = $this->update_contact($contact_id, $contact_data);
 
-        wp_send_json($result);
+        if (is_wp_error($result)) {
+            wp_send_json_error(array('message' => $result->get_error_message()));
+        } elseif ($result) {
+            wp_send_json_success(array('message' => __('Contact updated successfully', 'chatshop')));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to update contact', 'chatshop')));
+        }
     }
 
     /**
@@ -794,60 +1362,56 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     public function ajax_delete_contact()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
         }
 
-        $contact_id = absint($_POST['contact_id'] ?? 0);
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $contact_id = intval($_POST['contact_id'] ?? 0);
         $result = $this->delete_contact($contact_id);
 
-        wp_send_json($result);
+        if ($result) {
+            wp_send_json_success(array('message' => __('Contact deleted successfully', 'chatshop')));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to delete contact', 'chatshop')));
+        }
     }
 
     /**
-     * AJAX handler for bulk delete contacts
+     * AJAX handler for bulk deleting contacts
      *
      * @since 1.0.0
      */
     public function ajax_bulk_delete_contacts()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
         }
 
-        $contact_ids = array_map('absint', $_POST['contact_ids'] ?? array());
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $contact_ids = array_map('intval', $_POST['contact_ids'] ?? array());
 
         if (empty($contact_ids)) {
-            wp_send_json(array(
-                'success' => false,
-                'message' => __('No contacts selected.', 'chatshop')
-            ));
+            wp_send_json_error(array('message' => __('No contacts selected', 'chatshop')));
+            return;
         }
 
         $deleted_count = 0;
-        $errors = array();
-
         foreach ($contact_ids as $contact_id) {
-            $result = $this->delete_contact($contact_id);
-            if ($result['success']) {
+            if ($this->delete_contact($contact_id)) {
                 $deleted_count++;
-            } else {
-                $errors[] = $result['message'];
             }
         }
 
-        wp_send_json(array(
-            'success' => true,
-            'message' => sprintf(
-                __('%d contact(s) deleted successfully.', 'chatshop'),
-                $deleted_count
-            ),
-            'deleted_count' => $deleted_count,
-            'errors' => $errors
+        wp_send_json_success(array(
+            'message' => sprintf(__('%d contacts deleted successfully', 'chatshop'), $deleted_count),
+            'deleted_count' => $deleted_count
         ));
     }
 
@@ -858,28 +1422,57 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     public function ajax_import_contacts()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
         }
 
-        if (!chatshop_is_premium_feature_available('contact_import_export')) {
-            wp_send_json(array(
-                'success' => false,
-                'message' => __('Contact import/export is a premium feature.', 'chatshop')
-            ));
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
         }
 
-        if (!$this->import_export) {
-            wp_send_json(array(
-                'success' => false,
-                'message' => __('Import/export functionality not available.', 'chatshop')
-            ));
+        if (!chatshop_is_premium_feature_available('unlimited_contacts')) {
+            wp_send_json_error(array('message' => __('Contact import requires premium access', 'chatshop')));
+            return;
         }
 
-        $result = $this->import_export->handle_import();
-        wp_send_json($result);
+        if (!isset($_FILES['import_file']) || $_FILES['import_file']['error'] !== UPLOAD_ERR_OK) {
+            wp_send_json_error(array('message' => __('No file uploaded or upload error occurred', 'chatshop')));
+            return;
+        }
+
+        $file = $_FILES['import_file'];
+        $file_extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+        if (!in_array($file_extension, array('csv'))) {
+            wp_send_json_error(array('message' => __('Only CSV files are supported', 'chatshop')));
+            return;
+        }
+
+        // Parse CSV file
+        $csv_data = array();
+        if (($handle = fopen($file['tmp_name'], 'r')) !== FALSE) {
+            $headers = fgetcsv($handle);
+
+            // Normalize headers
+            $headers = array_map(function ($header) {
+                return strtolower(trim($header));
+            }, $headers);
+
+            while (($row = fgetcsv($handle)) !== FALSE) {
+                if (count($row) === count($headers)) {
+                    $csv_data[] = array_combine($headers, $row);
+                }
+            }
+            fclose($handle);
+        }
+
+        if (empty($csv_data)) {
+            wp_send_json_error(array('message' => __('No data found in CSV file', 'chatshop')));
+            return;
+        }
+
+        $results = $this->import_contacts($csv_data);
+        wp_send_json_success($results);
     }
 
     /**
@@ -889,29 +1482,44 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     public function ajax_export_contacts()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
         }
 
-        if (!chatshop_is_premium_feature_available('contact_import_export')) {
-            wp_send_json(array(
-                'success' => false,
-                'message' => __('Contact import/export is a premium feature.', 'chatshop')
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        if (!chatshop_is_premium_feature_available('unlimited_contacts')) {
+            wp_send_json_error(array('message' => __('Contact export requires premium access', 'chatshop')));
+            return;
+        }
+
+        $export_args = array(
+            'status' => sanitize_key($_POST['status'] ?? ''),
+            'group_id' => intval($_POST['group_id'] ?? 0)
+        );
+
+        $csv_content = $this->export_contacts($export_args);
+
+        if (!$csv_content) {
+            wp_send_json_error(array('message' => __('No contacts found to export', 'chatshop')));
+            return;
+        }
+
+        // Save to uploads directory
+        $upload_dir = wp_upload_dir();
+        $filename = 'chatshop-contacts-export-' . date('Y-m-d-H-i-s') . '.csv';
+        $file_path = $upload_dir['path'] . '/' . $filename;
+
+        if (file_put_contents($file_path, $csv_content)) {
+            wp_send_json_success(array(
+                'download_url' => $upload_dir['url'] . '/' . $filename,
+                'message' => __('Contacts exported successfully', 'chatshop')
             ));
+        } else {
+            wp_send_json_error(array('message' => __('Failed to create export file', 'chatshop')));
         }
-
-        if (!$this->import_export) {
-            wp_send_json(array(
-                'success' => false,
-                'message' => __('Import/export functionality not available.', 'chatshop')
-            ));
-        }
-
-        $format = sanitize_text_field($_POST['format'] ?? 'csv');
-        $result = $this->import_export->handle_export($format);
-        wp_send_json($result);
     }
 
     /**
@@ -921,38 +1529,42 @@ class ChatShop_Contact_Manager extends ChatShop_Abstract_Component
      */
     public function ajax_get_contact_stats()
     {
-        check_ajax_referer('chatshop_admin_nonce', 'nonce');
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
 
-        if (!current_user_can('manage_options')) {
-            wp_die(__('You do not have sufficient permissions.', 'chatshop'));
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
         }
 
         $stats = $this->get_contact_stats();
-        wp_send_json(array(
-            'success' => true,
-            'stats' => $stats
+        wp_send_json_success($stats);
+    }
+
+    /**
+     * AJAX handler for searching contacts
+     *
+     * @since 1.0.0
+     */
+    public function ajax_search_contacts()
+    {
+        if (!chatshop_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        if (!chatshop_check_permissions('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $search_term = sanitize_text_field($_POST['search'] ?? '');
+        $page = intval($_POST['page'] ?? 1);
+        $per_page = intval($_POST['per_page'] ?? 20);
+
+        $results = $this->search_contacts($search_term, array(
+            'page' => $page,
+            'per_page' => $per_page
         ));
-    }
 
-    /**
-     * Get table name
-     *
-     * @since 1.0.0
-     * @return string Table name
-     */
-    public function get_table_name()
-    {
-        return $this->table_name;
-    }
-
-    /**
-     * Get free contact limit
-     *
-     * @since 1.0.0
-     * @return int Free contact limit
-     */
-    public function get_free_contact_limit()
-    {
-        return $this->free_contact_limit;
+        wp_send_json_success($results);
     }
 }

@@ -1,12 +1,12 @@
 <?php
 
 /**
- * Corrected Admin Menu Handler - Perfect Integration with Existing Code
+ * Admin Menu Management - CONSOLIDATED VERSION
  *
  * File: admin/class-chatshop-admin-menu.php
  * 
- * This corrected version ensures 100% compatibility with the existing
- * ChatShop codebase structure and maintains all existing functionality.
+ * Consolidated admin menu registration system that handles all ChatShop
+ * admin pages with proper component checking and error handling.
  *
  * @package ChatShop
  * @subpackage Admin
@@ -21,30 +21,38 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * ChatShop Admin Menu Class - Corrected Version
+ * ChatShop Admin Menu Class - CONSOLIDATED VERSION
  *
- * Manages the admin menu structure, page routing, and navigation
- * for the ChatShop plugin with perfect integration to existing system.
+ * Manages all admin menu registration, page rendering, and component validation
+ * in a single, consistent system with enhanced error handling.
  *
  * @since 1.0.0
  */
 class ChatShop_Admin_Menu
 {
     /**
-     * Menu position
-     *
-     * @var int
-     * @since 1.0.0
-     */
-    private $menu_position = 30;
-
-    /**
-     * Menu capability
+     * Menu capability requirement
      *
      * @var string
      * @since 1.0.0
      */
     private $capability = 'manage_options';
+
+    /**
+     * Component loader instance
+     *
+     * @var ChatShop_Component_Loader
+     * @since 1.0.0
+     */
+    private $component_loader;
+
+    /**
+     * Loading errors for display
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $component_errors = array();
 
     /**
      * Constructor
@@ -53,29 +61,57 @@ class ChatShop_Admin_Menu
      */
     public function __construct()
     {
-        add_action('admin_menu', array($this, 'add_admin_menu'));
-        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        $this->init_hooks();
+        $this->get_component_loader();
     }
 
     /**
-     * Add admin menu - UPDATED WITH ANALYTICS INTEGRATION
+     * Initialize WordPress hooks
+     *
+     * @since 1.0.0
+     */
+    private function init_hooks()
+    {
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        add_action('admin_notices', array($this, 'display_component_notices'));
+    }
+
+    /**
+     * Get component loader instance
+     *
+     * @since 1.0.0
+     */
+    private function get_component_loader()
+    {
+        if (function_exists('chatshop') && chatshop()) {
+            $this->component_loader = chatshop()->get_component_loader();
+
+            if ($this->component_loader) {
+                $this->component_errors = $this->component_loader->get_loading_errors();
+            }
+        }
+    }
+
+    /**
+     * Add admin menu with consolidated structure
      *
      * @since 1.0.0
      */
     public function add_admin_menu()
     {
-        // Main menu page
+        // Main ChatShop menu
         add_menu_page(
             __('ChatShop', 'chatshop'),
             __('ChatShop', 'chatshop'),
             $this->capability,
             'chatshop',
             array($this, 'display_dashboard_page'),
-            $this->get_menu_icon(),
-            $this->menu_position
+            'dashicons-whatsapp',
+            30
         );
 
-        // Dashboard submenu (rename main menu)
+        // Dashboard submenu (duplicate for proper highlighting)
         add_submenu_page(
             'chatshop',
             __('Dashboard', 'chatshop'),
@@ -85,7 +121,7 @@ class ChatShop_Admin_Menu
             array($this, 'display_dashboard_page')
         );
 
-        // Analytics submenu - NEW ANALYTICS INTEGRATION
+        // Analytics submenu
         add_submenu_page(
             'chatshop',
             __('Analytics', 'chatshop'),
@@ -95,14 +131,34 @@ class ChatShop_Admin_Menu
             array($this, 'display_analytics_page')
         );
 
-        // Contacts submenu - EXISTING CONTACT MANAGEMENT
+        // Contact Management submenu
         add_submenu_page(
             'chatshop',
-            __('Contacts', 'chatshop'),
+            __('Contact Management', 'chatshop'),
             __('Contacts', 'chatshop') . $this->get_premium_indicator('unlimited_contacts'),
             $this->capability,
             'chatshop-contacts',
             array($this, 'display_contacts_page')
+        );
+
+        // WhatsApp submenu - ADDED
+        add_submenu_page(
+            'chatshop',
+            __('WhatsApp', 'chatshop'),
+            __('WhatsApp', 'chatshop') . $this->get_premium_indicator('whatsapp_business_api'),
+            $this->capability,
+            'chatshop-whatsapp',
+            array($this, 'display_whatsapp_page')
+        );
+
+        // Payments submenu - ADDED AS TOP-LEVEL
+        add_submenu_page(
+            'chatshop',
+            __('Payments', 'chatshop'),
+            __('Payments', 'chatshop') . $this->get_premium_indicator('advanced_payments'),
+            $this->capability,
+            'chatshop-payments',
+            array($this, 'display_payments_page')
         );
 
         // Messages submenu (placeholder for future development)
@@ -148,7 +204,7 @@ class ChatShop_Admin_Menu
         add_submenu_page(
             'chatshop-settings',
             __('Payment Settings', 'chatshop'),
-            __('Payments', 'chatshop'),
+            __('Payment Config', 'chatshop'),
             $this->capability,
             'chatshop-settings-payments',
             array($this, 'display_payment_settings_page')
@@ -157,7 +213,7 @@ class ChatShop_Admin_Menu
         add_submenu_page(
             'chatshop-settings',
             __('WhatsApp Settings', 'chatshop'),
-            __('WhatsApp', 'chatshop'),
+            __('WhatsApp Config', 'chatshop'),
             $this->capability,
             'chatshop-settings-whatsapp',
             array($this, 'display_whatsapp_settings_page')
@@ -175,7 +231,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display dashboard page - EXISTING METHOD
+     * Display dashboard page
      *
      * @since 1.0.0
      */
@@ -185,21 +241,20 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display analytics page - NEW ANALYTICS METHOD
+     * Display analytics page with component validation
      *
      * @since 1.0.0
      */
     public function display_analytics_page()
     {
         // Check if analytics component is available
-        $analytics = function_exists('chatshop_get_component') ?
-            chatshop_get_component('analytics') : null;
+        $analytics = $this->get_component('analytics');
 
         if (!$analytics) {
             $this->render_component_unavailable_page(
                 'analytics',
                 __('Analytics Dashboard', 'chatshop'),
-                __('The analytics component is not available. Please ensure the component is properly installed and activated.', 'chatshop')
+                __('The analytics component is not available. Please check the component status below.', 'chatshop')
             );
             return;
         }
@@ -208,21 +263,20 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display contacts page - EXISTING METHOD
+     * Display contacts page with component validation
      *
      * @since 1.0.0
      */
     public function display_contacts_page()
     {
         // Check if contact manager component is available
-        $contact_manager = function_exists('chatshop_get_component') ?
-            chatshop_get_component('contact_manager') : null;
+        $contact_manager = $this->get_component('contact_manager');
 
         if (!$contact_manager) {
             $this->render_component_unavailable_page(
                 'contacts',
                 __('Contact Management', 'chatshop'),
-                __('The contact management component is not available. Please ensure the component is properly installed and activated.', 'chatshop')
+                __('The contact management component is not available. Please check the component status below.', 'chatshop')
             );
             return;
         }
@@ -231,7 +285,51 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display messages page - EXISTING METHOD
+     * Display WhatsApp page with component validation - NEW
+     *
+     * @since 1.0.0
+     */
+    public function display_whatsapp_page()
+    {
+        // Check if WhatsApp component is available
+        $whatsapp = $this->get_component('whatsapp');
+
+        if (!$whatsapp) {
+            $this->render_component_unavailable_page(
+                'whatsapp',
+                __('WhatsApp Integration', 'chatshop'),
+                __('The WhatsApp component is not available. Please check the component status below.', 'chatshop')
+            );
+            return;
+        }
+
+        $this->render_admin_page('whatsapp');
+    }
+
+    /**
+     * Display payments page with component validation - NEW
+     *
+     * @since 1.0.0
+     */
+    public function display_payments_page()
+    {
+        // Check if payment component is available
+        $payment = $this->get_component('payment');
+
+        if (!$payment) {
+            $this->render_component_unavailable_page(
+                'payment',
+                __('Payment Management', 'chatshop'),
+                __('The payment component is not available. Please check the component status below.', 'chatshop')
+            );
+            return;
+        }
+
+        $this->render_admin_page('payments');
+    }
+
+    /**
+     * Display messages page
      *
      * @since 1.0.0
      */
@@ -241,7 +339,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display campaigns page - EXISTING METHOD
+     * Display campaigns page
      *
      * @since 1.0.0
      */
@@ -251,7 +349,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display general settings page - EXISTING METHOD
+     * Display general settings page
      *
      * @since 1.0.0
      */
@@ -261,7 +359,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display payment settings page - EXISTING METHOD
+     * Display payment settings page
      *
      * @since 1.0.0
      */
@@ -271,7 +369,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display WhatsApp settings page - EXISTING METHOD
+     * Display WhatsApp settings page
      *
      * @since 1.0.0
      */
@@ -281,7 +379,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Display premium page - EXISTING METHOD
+     * Display premium page
      *
      * @since 1.0.0
      */
@@ -291,7 +389,40 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Enqueue admin assets - UPDATED WITH ANALYTICS SUPPORT
+     * Get component instance with proper error handling
+     *
+     * @since 1.0.0
+     * @param string $component_id Component identifier
+     * @return object|null Component instance or null if not found
+     */
+    private function get_component($component_id)
+    {
+        if (!$this->component_loader) {
+            return null;
+        }
+
+        return $this->component_loader->get_component_instance($component_id);
+    }
+
+    /**
+     * Get premium indicator for menu items
+     *
+     * @since 1.0.0
+     * @param string $feature Feature name
+     * @return string Premium indicator HTML
+     */
+    private function get_premium_indicator($feature)
+    {
+        if (!function_exists('chatshop_is_premium') || chatshop_is_premium()) {
+            return '';
+        }
+
+        return ' <span class="chatshop-premium-indicator" title="' .
+            esc_attr__('Premium Feature', 'chatshop') . '">★</span>';
+    }
+
+    /**
+     * Enqueue admin assets with proper page detection
      *
      * @since 1.0.0
      * @param string $hook_suffix Current admin page hook suffix
@@ -311,130 +442,188 @@ class ChatShop_Admin_Menu
             CHATSHOP_VERSION
         );
 
-        // Common admin scripts
+        // Common admin JavaScript
         wp_enqueue_script(
             'chatshop-admin',
             CHATSHOP_PLUGIN_URL . 'admin/js/chatshop-admin.js',
-            array('jquery'),
+            array('jquery', 'wp-util'),
             CHATSHOP_VERSION,
             true
         );
 
-        // Analytics-specific assets - NEW ANALYTICS ASSETS
-        if ($hook_suffix === 'chatshop_page_chatshop-analytics') {
-            wp_enqueue_script(
-                'chatshop-analytics',
-                CHATSHOP_PLUGIN_URL . 'admin/js/chatshop-analytics.js',
-                array('jquery', 'chatshop-admin'),
-                CHATSHOP_VERSION,
-                true
-            );
-        }
-
-        // Contact-specific assets - EXISTING CONTACT ASSETS
-        if ($hook_suffix === 'chatshop_page_chatshop-contacts') {
-            $this->enqueue_contact_assets();
-        }
-
-        // Localize script for AJAX - UPDATED WITH ANALYTICS STRINGS
-        wp_localize_script('chatshop-admin', 'chatshop_admin', array(
-            'ajax_url'   => admin_url('admin-ajax.php'),
-            'nonce'      => wp_create_nonce('chatshop_admin_nonce'),
-            'plugin_url' => CHATSHOP_PLUGIN_URL,
-            'strings'    => array(
-                'loading'           => __('Loading...', 'chatshop'),
-                'error'             => __('An error occurred. Please try again.', 'chatshop'),
-                'success'           => __('Success!', 'chatshop'),
-                'confirm_delete'    => __('Are you sure you want to delete this item?', 'chatshop'),
-                'premium_required'  => __('This feature requires premium access.', 'chatshop'),
-                'analytics_loading' => __('Loading analytics data...', 'chatshop'),
-                'export_failed'     => __('Export failed. Please try again.', 'chatshop'),
-                'no_data'           => __('No data available for the selected period.', 'chatshop'),
-                // Contact management strings - EXISTING
-                'phoneRequired'     => __('Phone number is required.', 'chatshop'),
-                'nameRequired'      => __('Name is required.', 'chatshop'),
-                'invalidPhone'      => __('Please enter a valid phone number.', 'chatshop'),
-                'invalidEmail'      => __('Please enter a valid email address.', 'chatshop'),
-                'errorGeneric'      => __('An error occurred. Please try again.', 'chatshop'),
-                'importedCount'     => __('%d contacts imported successfully.', 'chatshop'),
-                'skippedCount'      => __('%d contacts skipped (already exist).', 'chatshop'),
-                'failedCount'       => __('%d contacts failed to import.', 'chatshop')
+        // Localize script with common data
+        wp_localize_script('chatshop-admin', 'chatshopAdmin', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('chatshop_admin_nonce'),
+            'isPremium' => function_exists('chatshop_is_premium') ? chatshop_is_premium() : false,
+            'currentPage' => $this->get_current_page_slug($hook_suffix),
+            'strings' => array(
+                'loading' => __('Loading...', 'chatshop'),
+                'error' => __('An error occurred. Please try again.', 'chatshop'),
+                'success' => __('Operation completed successfully.', 'chatshop'),
+                'confirm' => __('Are you sure?', 'chatshop'),
+                'componentError' => __('Component not loaded. Please check system status.', 'chatshop'),
+                'premiumRequired' => __('This feature requires premium access.', 'chatshop')
             )
         ));
+
+        // Page-specific assets
+        $this->enqueue_page_specific_assets($hook_suffix);
     }
 
     /**
-     * Enqueue contact-specific assets - EXISTING METHOD
+     * Enqueue page-specific assets
+     *
+     * @since 1.0.0
+     * @param string $hook_suffix Current admin page hook suffix
+     */
+    private function enqueue_page_specific_assets($hook_suffix)
+    {
+        // Analytics page assets
+        if (strpos($hook_suffix, 'chatshop-analytics') !== false) {
+            $this->enqueue_analytics_assets();
+        }
+
+        // Contacts page assets
+        if (strpos($hook_suffix, 'chatshop-contacts') !== false) {
+            $this->enqueue_contact_assets();
+        }
+
+        // WhatsApp page assets
+        if (strpos($hook_suffix, 'chatshop-whatsapp') !== false) {
+            $this->enqueue_whatsapp_assets();
+        }
+
+        // Payments page assets
+        if (strpos($hook_suffix, 'chatshop-payments') !== false) {
+            $this->enqueue_payment_assets();
+        }
+    }
+
+    /**
+     * Enqueue analytics-specific assets
+     *
+     * @since 1.0.0
+     */
+    private function enqueue_analytics_assets()
+    {
+        wp_enqueue_script(
+            'chatshop-analytics',
+            CHATSHOP_PLUGIN_URL . 'admin/js/analytics.js',
+            array('jquery', 'wp-util'),
+            CHATSHOP_VERSION,
+            true
+        );
+
+        wp_enqueue_style(
+            'chatshop-analytics',
+            CHATSHOP_PLUGIN_URL . 'admin/css/analytics.css',
+            array('chatshop-admin'),
+            CHATSHOP_VERSION
+        );
+
+        // Chart.js for analytics charts
+        wp_enqueue_script(
+            'chartjs',
+            'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js',
+            array(),
+            '3.9.1',
+            true
+        );
+    }
+
+    /**
+     * Enqueue contact-specific assets
      *
      * @since 1.0.0
      */
     private function enqueue_contact_assets()
     {
-        // Contact-specific JavaScript
-        wp_localize_script('chatshop-admin', 'chatshop_contacts', array(
-            'strings' => array(
-                'confirmBulkDelete' => __('Are you sure you want to delete the selected contacts?', 'chatshop'),
-                'refreshPage'       => __('Refresh Page', 'chatshop'),
-                'unlimitedContactsTitle' => __('Unlimited Contacts', 'chatshop'),
-                'unlimitedContactsDesc'  => __('Upgrade to premium to add unlimited contacts to your WhatsApp marketing campaigns.', 'chatshop'),
-                'importExportTitle'      => __('Import/Export Contacts', 'chatshop'),
-                'importExportDesc'       => __('Import contacts from CSV/Excel files and export your contact list for backup or analysis.', 'chatshop'),
-                'premiumFeatureTitle'    => __('Premium Feature', 'chatshop'),
-                'premiumFeatureDesc'     => __('This feature is available in the premium version of ChatShop.', 'chatshop')
-            )
-        ));
-
-        // Enqueue contact-specific styles
-        wp_enqueue_style(
+        wp_enqueue_script(
             'chatshop-contacts',
-            CHATSHOP_PLUGIN_URL . 'admin/css/chatshop-contacts.css',
-            array(),
-            CHATSHOP_VERSION
+            CHATSHOP_PLUGIN_URL . 'admin/js/contacts.js',
+            array('jquery', 'wp-util'),
+            CHATSHOP_VERSION,
+            true
         );
 
-        // Add inline styles for contact management if CSS file doesn't exist
-        if (!file_exists(CHATSHOP_PLUGIN_DIR . 'admin/css/chatshop-contacts.css')) {
-            wp_add_inline_style('wp-admin', '
-                .chatshop-contact-stats { margin: 20px 0; }
-                .chatshop-stats-grid { 
-                    display: grid; 
-                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-                    gap: 20px; 
-                    margin-bottom: 20px; 
-                }
-                .stat-card { 
-                    background: #fff; 
-                    border: 1px solid #ccd0d4; 
-                    border-radius: 4px; 
-                    padding: 20px; 
-                    text-align: center; 
-                    transition: box-shadow 0.2s; 
-                }
-                .stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-                .stat-card.stat-warning { border-color: #f56565; background: #fff5f5; }
-                .stat-number { 
-                    font-size: 32px; 
-                    font-weight: bold; 
-                    margin-bottom: 8px; 
-                    color: #2c3e50; 
-                }
-                .stat-warning .stat-number { color: #e53e3e; }
-                .stat-label { 
-                    font-size: 14px; 
-                    color: #666; 
-                    text-transform: uppercase; 
-                    letter-spacing: 0.5px; 
-                }
-                .chatshop-contact-actions { margin: 20px 0; }
-                .chatshop-contact-actions .button { margin-right: 10px; }
-                .chatshop-premium-feature { position: relative; opacity: 0.7; }
-                .chatshop-premium-feature .dashicons-lock { font-size: 12px; vertical-align: text-top; }
-            ');
-        }
+        wp_enqueue_style(
+            'chatshop-contacts',
+            CHATSHOP_PLUGIN_URL . 'admin/css/contacts.css',
+            array('chatshop-admin'),
+            CHATSHOP_VERSION
+        );
     }
 
     /**
-     * Render admin page template - EXISTING METHOD
+     * Enqueue WhatsApp-specific assets
+     *
+     * @since 1.0.0
+     */
+    private function enqueue_whatsapp_assets()
+    {
+        wp_enqueue_script(
+            'chatshop-whatsapp',
+            CHATSHOP_PLUGIN_URL . 'admin/js/whatsapp.js',
+            array('jquery', 'wp-util'),
+            CHATSHOP_VERSION,
+            true
+        );
+
+        wp_enqueue_style(
+            'chatshop-whatsapp',
+            CHATSHOP_PLUGIN_URL . 'admin/css/whatsapp.css',
+            array('chatshop-admin'),
+            CHATSHOP_VERSION
+        );
+    }
+
+    /**
+     * Enqueue payment-specific assets
+     *
+     * @since 1.0.0
+     */
+    private function enqueue_payment_assets()
+    {
+        wp_enqueue_script(
+            'chatshop-payments',
+            CHATSHOP_PLUGIN_URL . 'admin/js/payments.js',
+            array('jquery', 'wp-util'),
+            CHATSHOP_VERSION,
+            true
+        );
+
+        wp_enqueue_style(
+            'chatshop-payments',
+            CHATSHOP_PLUGIN_URL . 'admin/css/payments.css',
+            array('chatshop-admin'),
+            CHATSHOP_VERSION
+        );
+    }
+
+    /**
+     * Get current page slug from hook suffix
+     *
+     * @since 1.0.0
+     * @param string $hook_suffix Hook suffix
+     * @return string Page slug
+     */
+    private function get_current_page_slug($hook_suffix)
+    {
+        if (strpos($hook_suffix, 'chatshop-analytics') !== false) return 'analytics';
+        if (strpos($hook_suffix, 'chatshop-contacts') !== false) return 'contacts';
+        if (strpos($hook_suffix, 'chatshop-whatsapp') !== false) return 'whatsapp';
+        if (strpos($hook_suffix, 'chatshop-payments') !== false) return 'payments';
+        if (strpos($hook_suffix, 'chatshop-messages') !== false) return 'messages';
+        if (strpos($hook_suffix, 'chatshop-campaigns') !== false) return 'campaigns';
+        if (strpos($hook_suffix, 'chatshop-settings') !== false) return 'settings';
+        if (strpos($hook_suffix, 'chatshop-premium') !== false) return 'premium';
+
+        return 'dashboard';
+    }
+
+    /**
+     * Render admin page template with error handling
      *
      * @since 1.0.0
      * @param string $template Template name
@@ -444,6 +633,10 @@ class ChatShop_Admin_Menu
         $template_path = CHATSHOP_PLUGIN_DIR . "admin/partials/{$template}.php";
 
         if (file_exists($template_path)) {
+            // Pass component loader and errors to template
+            $component_loader = $this->component_loader;
+            $component_errors = $this->component_errors;
+
             include $template_path;
         } else {
             $this->render_placeholder_page($template);
@@ -451,7 +644,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Render component unavailable page - EXISTING METHOD
+     * Render component unavailable page with enhanced diagnostics
      *
      * @since 1.0.0
      * @param string $component Component name
@@ -460,6 +653,14 @@ class ChatShop_Admin_Menu
      */
     private function render_component_unavailable_page($component, $title, $message)
     {
+        $component_error = isset($this->component_errors[$component]) ?
+            $this->component_errors[$component] : null;
+
+        $loading_order = $this->component_loader ?
+            $this->component_loader->get_loading_order() : array();
+
+        $loaded_components = $this->component_loader ?
+            array_keys($this->component_loader->get_all_instances()) : array();
 ?>
         <div class="wrap">
             <h1><?php echo esc_html($title); ?></h1>
@@ -468,14 +669,63 @@ class ChatShop_Admin_Menu
                 <div class="notice notice-error">
                     <p><strong><?php _e('Component Unavailable', 'chatshop'); ?></strong></p>
                     <p><?php echo esc_html($message); ?></p>
+
+                    <?php if ($component_error): ?>
+                        <p><strong><?php _e('Error Details:', 'chatshop'); ?></strong>
+                            <code><?php echo esc_html($component_error); ?></code>
+                        </p>
+                    <?php endif; ?>
                 </div>
+
+                <?php if (defined('WP_DEBUG') && WP_DEBUG): ?>
+                    <div class="component-debug-info">
+                        <h3><?php _e('Debug Information', 'chatshop'); ?></h3>
+
+                        <h4><?php _e('Component Loading Status:', 'chatshop'); ?></h4>
+                        <ul>
+                            <li><strong><?php _e('Requested Component:', 'chatshop'); ?></strong> <?php echo esc_html($component); ?></li>
+                            <li><strong><?php _e('Component Loader Available:', 'chatshop'); ?></strong>
+                                <?php echo $this->component_loader ? '✓ Yes' : '✗ No'; ?></li>
+                            <li><strong><?php _e('Total Loaded Components:', 'chatshop'); ?></strong>
+                                <?php echo count($loaded_components); ?></li>
+                        </ul>
+
+                        <?php if (!empty($loaded_components)): ?>
+                            <h4><?php _e('Successfully Loaded Components:', 'chatshop'); ?></h4>
+                            <ul>
+                                <?php foreach ($loaded_components as $loaded_component): ?>
+                                    <li>✓ <?php echo esc_html($loaded_component); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+
+                        <?php if (!empty($this->component_errors)): ?>
+                            <h4><?php _e('Component Loading Errors:', 'chatshop'); ?></h4>
+                            <ul>
+                                <?php foreach ($this->component_errors as $error_component => $error_message): ?>
+                                    <li>✗ <strong><?php echo esc_html($error_component); ?>:</strong>
+                                        <?php echo esc_html($error_message); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+
+                        <h4><?php _e('Component Loading Order:', 'chatshop'); ?></h4>
+                        <ol>
+                            <?php foreach ($loading_order as $loaded_component): ?>
+                                <li><?php echo esc_html($loaded_component); ?></li>
+                            <?php endforeach; ?>
+                        </ol>
+                    </div>
+                <?php endif; ?>
 
                 <div class="component-troubleshooting">
                     <h3><?php _e('Troubleshooting Steps:', 'chatshop'); ?></h3>
                     <ol>
+                        <li><?php _e('Enable WP_DEBUG in wp-config.php to see detailed error information', 'chatshop'); ?></li>
                         <li><?php _e('Deactivate and reactivate the ChatShop plugin', 'chatshop'); ?></li>
                         <li><?php _e('Check that all plugin files are properly uploaded', 'chatshop'); ?></li>
-                        <li><?php _e('Verify file permissions are correctly set', 'chatshop'); ?></li>
+                        <li><?php _e('Verify file permissions are correctly set (644 for files, 755 for directories)', 'chatshop'); ?></li>
+                        <li><?php _e('Clear any object caches or optimization plugins', 'chatshop'); ?></li>
                         <li><?php _e('Contact support if the issue persists', 'chatshop'); ?></li>
                     </ol>
                 </div>
@@ -484,25 +734,50 @@ class ChatShop_Admin_Menu
                     <a href="<?php echo admin_url('admin.php?page=chatshop'); ?>" class="button button-primary">
                         <?php _e('Return to Dashboard', 'chatshop'); ?>
                     </a>
+
+                    <?php if (defined('WP_DEBUG') && WP_DEBUG): ?>
+                        <a href="<?php echo admin_url('admin.php?page=chatshop&debug_components=1'); ?>"
+                            class="button button-secondary">
+                            <?php _e('Reload Components', 'chatshop'); ?>
+                        </a>
+                    <?php endif; ?>
                 </p>
             </div>
         </div>
 
         <style>
             .chatshop-component-unavailable {
-                max-width: 600px;
+                max-width: 800px;
                 margin: 20px 0;
             }
 
-            .component-troubleshooting {
+            .component-troubleshooting,
+            .component-debug-info {
                 background: #f8f9fa;
                 padding: 20px;
                 border-radius: 4px;
                 margin: 20px 0;
             }
 
-            .component-troubleshooting h3 {
+            .component-troubleshooting h3,
+            .component-debug-info h3 {
                 margin-top: 0;
+            }
+
+            .component-debug-info {
+                border-left: 4px solid #007cba;
+            }
+
+            .component-debug-info ul,
+            .component-debug-info ol {
+                margin: 10px 0;
+                padding-left: 20px;
+            }
+
+            .component-debug-info li {
+                margin-bottom: 5px;
+                font-family: monospace;
+                font-size: 13px;
             }
 
             .component-troubleshooting ol {
@@ -517,7 +792,7 @@ class ChatShop_Admin_Menu
     }
 
     /**
-     * Render placeholder page for unimplemented features - EXISTING METHOD
+     * Render placeholder page for unimplemented features
      *
      * @since 1.0.0
      * @param string $template Template name
@@ -527,8 +802,9 @@ class ChatShop_Admin_Menu
         $page_titles = array(
             'messages' => __('Messages', 'chatshop'),
             'campaigns' => __('Campaigns', 'chatshop'),
-            'analytics' => __('Analytics', 'chatshop'),
-            'premium' => __('Premium & Support', 'chatshop')
+            'premium' => __('Premium & Support', 'chatshop'),
+            'whatsapp' => __('WhatsApp Integration', 'chatshop'),
+            'payments' => __('Payment Management', 'chatshop')
         );
 
         $title = isset($page_titles[$template]) ? $page_titles[$template] : ucfirst($template);
@@ -544,130 +820,384 @@ class ChatShop_Admin_Menu
                         <p class="lead"><?php _e('Unlock powerful features to supercharge your WhatsApp marketing and boost sales conversions.', 'chatshop'); ?></p>
 
                         <div class="premium-features-grid">
-                            <!-- Premium features content -->
+                            <div class="feature-card">
+                                <h3><?php _e('Advanced Analytics', 'chatshop'); ?></h3>
+                                <p><?php _e('Track conversion rates, revenue attribution, and detailed campaign performance.', 'chatshop'); ?></p>
+                            </div>
+                            <div class="feature-card">
+                                <h3><?php _e('Unlimited Contacts', 'chatshop'); ?></h3>
+                                <p><?php _e('Import and manage unlimited WhatsApp contacts with advanced segmentation.', 'chatshop'); ?></p>
+                            </div>
+                            <div class="feature-card">
+                                <h3><?php _e('Campaign Automation', 'chatshop'); ?></h3>
+                                <p><?php _e('Set up automated WhatsApp campaigns with triggers and sequences.', 'chatshop'); ?></p>
+                            </div>
+                            <div class="feature-card">
+                                <h3><?php _e('WhatsApp Business API', 'chatshop'); ?></h3>
+                                <p><?php _e('Direct integration with WhatsApp Business API for enhanced messaging capabilities.', 'chatshop'); ?></p>
+                            </div>
+                            <div class="feature-card">
+                                <h3><?php _e('Advanced Payment Gateways', 'chatshop'); ?></h3>
+                                <p><?php _e('Support for multiple payment gateways including PayPal, Stripe, and more.', 'chatshop'); ?></p>
+                            </div>
+                            <div class="feature-card">
+                                <h3><?php _e('Priority Support', 'chatshop'); ?></h3>
+                                <p><?php _e('Get priority email and chat support from our expert team.', 'chatshop'); ?></p>
+                            </div>
+                        </div>
+
+                        <div class="premium-cta">
+                            <a href="#" class="button button-primary button-hero">
+                                <?php _e('Upgrade to Premium', 'chatshop'); ?>
+                            </a>
+                            <p class="pricing-note">
+                                <?php _e('Starting at $29/month. 14-day money-back guarantee.', 'chatshop'); ?>
+                            </p>
                         </div>
                     </div>
                 <?php else: ?>
-                    <div class="chatshop-premium-feature-placeholder">
-                        <div class="premium-feature-icon">
-                            <span class="dashicons dashicons-lock"></span>
+                    <div class="chatshop-feature-placeholder">
+                        <div class="feature-icon">
+                            <span class="dashicons dashicons-<?php echo $this->get_page_icon($template); ?>"></span>
                         </div>
 
                         <h2><?php echo esc_html($title); ?></h2>
                         <p><?php printf(__('The %s feature is currently under development and will be available in a future update.', 'chatshop'), strtolower($title)); ?></p>
 
-                        <div class="development-status">
-                            <h3><?php _e('Development Progress', 'chatshop'); ?></h3>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 75%;"></div>
-                            </div>
-                            <p><?php _e('Expected completion: Next major update', 'chatshop'); ?></p>
+                        <div class="feature-preview">
+                            <?php $this->render_feature_preview($template); ?>
                         </div>
 
-                        <p>
+                        <div class="placeholder-actions">
                             <a href="<?php echo admin_url('admin.php?page=chatshop'); ?>" class="button button-primary">
                                 <?php _e('Return to Dashboard', 'chatshop'); ?>
                             </a>
-                        </p>
+                            <a href="<?php echo admin_url('admin.php?page=chatshop-premium'); ?>" class="button button-secondary">
+                                <?php _e('Learn About Premium', 'chatshop'); ?>
+                            </a>
+                        </div>
                     </div>
                 <?php endif; ?>
             </div>
         </div>
-    <?php
 
-        // Add inline styles for the placeholder pages
-        $this->add_placeholder_styles();
-    }
-
-    /**
-     * Add inline styles for placeholder pages - EXISTING METHOD
-     *
-     * @since 1.0.0
-     */
-    private function add_placeholder_styles()
-    {
-    ?>
         <style>
             .chatshop-placeholder-page {
                 text-align: center;
-                padding: 60px 20px;
-            }
-
-            .chatshop-premium-feature-placeholder {
-                max-width: 600px;
-                margin: 0 auto;
-                background: #fff;
-                padding: 40px;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            }
-
-            .premium-feature-icon {
-                font-size: 64px;
-                color: #f39c12;
-                margin-bottom: 20px;
-            }
-
-            .development-status {
-                margin: 30px 0;
-            }
-
-            .progress-bar {
-                width: 100%;
-                height: 20px;
-                background-color: #f0f0f0;
-                border-radius: 10px;
-                overflow: hidden;
-                margin: 15px 0;
-            }
-
-            .progress-fill {
-                height: 100%;
-                background: linear-gradient(90deg, #4CAF50, #45a049);
-                transition: width 0.3s ease;
+                max-width: 800px;
+                margin: 40px auto;
             }
 
             .chatshop-premium-info-page {
-                max-width: 1200px;
+                max-width: 1000px;
                 margin: 0 auto;
             }
+
+            .feature-icon .dashicons {
+                font-size: 64px;
+                color: #666;
+                margin-bottom: 20px;
+            }
+
+            .premium-features-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin: 40px 0;
+            }
+
+            .feature-card {
+                background: #fff;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 20px;
+                text-align: left;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                transition: transform 0.2s ease;
+            }
+
+            .feature-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+            }
+
+            .feature-card h3 {
+                margin-top: 0;
+                color: #2c3e50;
+                font-size: 18px;
+            }
+
+            .feature-card p {
+                color: #666;
+                margin-bottom: 0;
+            }
+
+            .premium-cta {
+                text-align: center;
+                margin: 40px 0;
+                padding: 30px;
+                background: #f8f9fa;
+                border-radius: 8px;
+            }
+
+            .premium-cta .button-hero {
+                font-size: 18px;
+                padding: 12px 30px;
+                height: auto;
+            }
+
+            .pricing-note {
+                margin-top: 15px;
+                color: #666;
+                font-style: italic;
+            }
+
+            .feature-preview {
+                background: #f8f9fa;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+                text-align: left;
+            }
+
+            .feature-preview h4 {
+                margin-top: 0;
+                color: #2c3e50;
+            }
+
+            .feature-preview ul {
+                margin: 0;
+                padding-left: 20px;
+            }
+
+            .feature-preview li {
+                margin-bottom: 8px;
+            }
+
+            .placeholder-actions {
+                margin-top: 30px;
+            }
+
+            .placeholder-actions .button {
+                margin: 0 10px;
+            }
+
+            .lead {
+                font-size: 18px;
+                color: #666;
+                margin-bottom: 30px;
+            }
         </style>
+        <?php
+    }
+
+    /**
+     * Render feature preview for placeholder pages
+     *
+     * @since 1.0.0
+     * @param string $template Template name
+     */
+    private function render_feature_preview($template)
+    {
+        switch ($template) {
+            case 'messages':
+        ?>
+                <h4><?php _e('Coming Soon: Message Management', 'chatshop'); ?></h4>
+                <ul>
+                    <li><?php _e('Send bulk WhatsApp messages to contact groups', 'chatshop'); ?></li>
+                    <li><?php _e('Message templates and personalization', 'chatshop'); ?></li>
+                    <li><?php _e('Scheduled message delivery', 'chatshop'); ?></li>
+                    <li><?php _e('Message delivery reports and analytics', 'chatshop'); ?></li>
+                </ul>
+            <?php
+                break;
+
+            case 'campaigns':
+            ?>
+                <h4><?php _e('Coming Soon: Campaign Automation', 'chatshop'); ?></h4>
+                <ul>
+                    <li><?php _e('Automated drip campaigns via WhatsApp', 'chatshop'); ?></li>
+                    <li><?php _e('Trigger-based messaging (new orders, abandoned carts)', 'chatshop'); ?></li>
+                    <li><?php _e('A/B testing for message templates', 'chatshop'); ?></li>
+                    <li><?php _e('Campaign performance tracking', 'chatshop'); ?></li>
+                </ul>
+            <?php
+                break;
+
+            default:
+            ?>
+                <h4><?php _e('Feature in Development', 'chatshop'); ?></h4>
+                <p><?php _e('This feature is being actively developed and will be available soon.', 'chatshop'); ?></p>
 <?php
+                break;
+        }
     }
 
     /**
-     * Get menu icon (SVG) - EXISTING METHOD
+     * Get appropriate dashicon for page
      *
      * @since 1.0.0
-     * @return string Base64 encoded SVG icon
+     * @param string $template Template name
+     * @return string Dashicon name
      */
-    private function get_menu_icon()
+    private function get_page_icon($template)
     {
-        $svg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.890-5.335 11.893-11.893A11.821 11.821 0 0020.893 3.486" fill="#a7aaad"/>
-        </svg>';
+        $icons = array(
+            'messages' => 'email-alt',
+            'campaigns' => 'megaphone',
+            'whatsapp' => 'whatsapp',
+            'payments' => 'money-alt',
+            'analytics' => 'chart-bar',
+            'contacts' => 'groups'
+        );
 
-        return 'data:image/svg+xml;base64,' . base64_encode($svg);
+        return isset($icons[$template]) ? $icons[$template] : 'admin-generic';
     }
 
     /**
-     * Get premium indicator for menu items - UPDATED FOR ANALYTICS
+     * Display component notices in admin
      *
      * @since 1.0.0
-     * @param string $feature Feature name
-     * @return string Premium indicator HTML
      */
-    private function get_premium_indicator($feature)
+    public function display_component_notices()
     {
-        // Check if this is a premium feature and user doesn't have access
-        $is_available = function_exists('chatshop_is_premium_feature_available') ?
-            chatshop_is_premium_feature_available($feature) : false;
-
-        if ($is_available) {
-            return '';
+        // Only show on ChatShop pages
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'chatshop') === false) {
+            return;
         }
 
-        return ' <span class="chatshop-premium-badge" title="' . esc_attr__('Premium Feature', 'chatshop') . '">PRO</span>';
+        // Show component loading errors if any
+        if (!empty($this->component_errors)) {
+            $error_count = count($this->component_errors);
+
+            echo '<div class="notice notice-warning is-dismissible">';
+            echo '<p><strong>' . __('ChatShop Component Warning:', 'chatshop') . '</strong> ';
+            printf(
+                _n(
+                    '%d component failed to load properly.',
+                    '%d components failed to load properly.',
+                    $error_count,
+                    'chatshop'
+                ),
+                $error_count
+            );
+            echo ' <a href="#" onclick="jQuery(\'.component-errors-details\').toggle(); return false;">' .
+                __('Show Details', 'chatshop') . '</a></p>';
+
+            echo '<div class="component-errors-details" style="display: none; margin-top: 10px;">';
+            echo '<ul>';
+            foreach ($this->component_errors as $component => $error) {
+                echo '<li><strong>' . esc_html($component) . ':</strong> ' . esc_html($error) . '</li>';
+            }
+            echo '</ul>';
+            echo '</div>';
+            echo '</div>';
+        }
+
+        // Show component reload success if triggered
+        if (isset($_GET['debug_components']) && $_GET['debug_components'] === '1') {
+            echo '<div class="notice notice-info is-dismissible">';
+            echo '<p>' . __('Component reload triggered. Check the debug information below for details.', 'chatshop') . '</p>';
+            echo '</div>';
+        }
+
+        // Show system status notice if components are missing
+        if ($this->component_loader) {
+            $loaded_count = $this->component_loader->get_loaded_count();
+            $expected_components = array('payment', 'analytics', 'contact_manager'); // Core components
+
+            if ($loaded_count < count($expected_components)) {
+                echo '<div class="notice notice-error">';
+                echo '<p><strong>' . __('ChatShop System Alert:', 'chatshop') . '</strong> ';
+                echo __('Some core components are not loaded. This may affect plugin functionality.', 'chatshop');
+                echo ' <a href="' . admin_url('admin.php?page=chatshop&debug_components=1') . '">' .
+                    __('Diagnose Issues', 'chatshop') . '</a></p>';
+                echo '</div>';
+            }
+        }
+    }
+
+    /**
+     * Handle component reload debug action
+     *
+     * @since 1.0.0
+     */
+    public function handle_debug_actions()
+    {
+        // Check if debug component reload is requested
+        if (isset($_GET['debug_components']) && $_GET['debug_components'] === '1' && current_user_can('manage_options')) {
+            // Force component loader to reload
+            if ($this->component_loader) {
+                // Re-initialize component loader
+                $this->component_loader = null;
+                $this->get_component_loader();
+
+                // Add admin notice
+                add_action('admin_notices', function () {
+                    echo '<div class="notice notice-success is-dismissible">';
+                    echo '<p>' . __('Component reload completed. Check component status below.', 'chatshop') . '</p>';
+                    echo '</div>';
+                });
+            }
+        }
+    }
+
+    /**
+     * Add debug information to admin footer
+     *
+     * @since 1.0.0
+     */
+    public function add_debug_info_to_footer()
+    {
+        // Only show on ChatShop pages and if WP_DEBUG is enabled
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'chatshop') === false || !defined('WP_DEBUG') || !WP_DEBUG) {
+            return;
+        }
+
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        echo '<div id="chatshop-debug-info" style="margin-top: 20px; padding: 15px; background: #f1f1f1; border-left: 4px solid #0073aa;">';
+        echo '<h4>' . __('ChatShop Debug Information', 'chatshop') . '</h4>';
+
+        if ($this->component_loader) {
+            $loaded_components = array_keys($this->component_loader->get_all_instances());
+            $loading_order = $this->component_loader->get_loading_order();
+
+            echo '<p><strong>' . __('Loaded Components:', 'chatshop') . '</strong> ' .
+                (empty($loaded_components) ? __('None', 'chatshop') : implode(', ', $loaded_components)) . '</p>';
+
+            echo '<p><strong>' . __('Loading Order:', 'chatshop') . '</strong> ' .
+                (empty($loading_order) ? __('None', 'chatshop') : implode(' → ', $loading_order)) . '</p>';
+
+            if (!empty($this->component_errors)) {
+                echo '<p><strong>' . __('Component Errors:', 'chatshop') . '</strong></p>';
+                echo '<ul>';
+                foreach ($this->component_errors as $component => $error) {
+                    echo '<li>' . esc_html($component) . ': ' . esc_html($error) . '</li>';
+                }
+                echo '</ul>';
+            }
+        } else {
+            echo '<p style="color: red;"><strong>' . __('Component Loader Not Available', 'chatshop') . '</strong></p>';
+        }
+
+        echo '</div>';
+    }
+
+    /**
+     * Initialize debug actions
+     *
+     * @since 1.0.0
+     */
+    public function init_debug_actions()
+    {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            add_action('admin_init', array($this, 'handle_debug_actions'));
+            add_action('admin_footer', array($this, 'add_debug_info_to_footer'));
+        }
     }
 }
