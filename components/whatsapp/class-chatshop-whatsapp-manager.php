@@ -1,1024 +1,1408 @@
-// Validate and update contact opt-in status
-if ($result['success'] && $this->contact_manager) {
-$this->contact_manager->update_opt_in_status($phone, true);
-}<?php
+<?php
 
+/**
+ * ChatShop WhatsApp Manager Component
+ *
+ * File: components/whatsapp/class-chatshop-whatsapp-manager.php
+ * 
+ * Manages WhatsApp Business API integration, message sending,
+ * template management, and webhook handling.
+ *
+ * @package ChatShop
+ * @subpackage Components\WhatsApp
+ * @since 1.0.0
+ */
+
+namespace ChatShop;
+
+// Prevent direct access
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * ChatShop WhatsApp Manager Class
+ *
+ * Handles WhatsApp Business API integration with comprehensive
+ * message management, template support, and webhook processing.
+ *
+ * @since 1.0.0
+ */
+class ChatShop_WhatsApp_Manager extends ChatShop_Abstract_Component
+{
     /**
-     * WhatsApp API Client Class
+     * Component identifier
      *
-     * Handles direct WhatsApp Business API integration with Web API fallback.
-     * Supports message templates, product notifications, and premium features.
-     *
-     * @package ChatShop
-     * @subpackage Components\WhatsApp
+     * @var string
      * @since 1.0.0
      */
+    protected $id = 'whatsapp';
 
-    namespace ChatShop;
+    /**
+     * Component name
+     *
+     * @var string
+     * @since 1.0.0
+     */
+    protected $name = 'WhatsApp Integration';
 
-    // Prevent direct access
-    if (!defined('ABSPATH')) {
-        exit;
+    /**
+     * Component description
+     *
+     * @var string
+     * @since 1.0.0
+     */
+    protected $description = 'WhatsApp messaging and automation features';
+
+    /**
+     * WhatsApp Business API base URL
+     *
+     * @var string
+     * @since 1.0.0
+     */
+    private $api_base_url = 'https://graph.facebook.com/v18.0/';
+
+    /**
+     * API credentials
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $credentials = array();
+
+    /**
+     * Database table names
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $tables = array();
+
+    /**
+     * Message templates cache
+     *
+     * @var array
+     * @since 1.0.0
+     */
+    private $templates_cache = array();
+
+    /**
+     * Connection status
+     *
+     * @var bool
+     * @since 1.0.0
+     */
+    private $is_connected = false;
+
+    /**
+     * Initialize component
+     *
+     * @since 1.0.0
+     */
+    protected function init()
+    {
+        $this->setup_database_tables();
+        $this->load_credentials();
+        $this->init_hooks();
+        $this->verify_connection();
+
+        chatshop_log('WhatsApp Manager component initialized', 'info');
     }
 
     /**
-     * ChatShop WhatsApp API Client
-     *
-     * Direct WhatsApp Business API integration with fallback to Web API.
-     * Handles message sending, templates, and session management.
+     * Setup database table names
      *
      * @since 1.0.0
      */
-    class ChatShop_WhatsApp_API
+    private function setup_database_tables()
     {
-        /**
-         * WhatsApp Business API base URL
-         *
-         * @var string
-         * @since 1.0.0
-         */
-        private $business_api_url = 'https://graph.facebook.com/v18.0/';
+        global $wpdb;
 
-        /**
-         * WhatsApp Web API base URL (fallback)
-         *
-         * @var string
-         * @since 1.0.0
-         */
-        private $web_api_url = 'https://api.whatsapp.com/send';
+        $this->tables = array(
+            'messages' => $wpdb->prefix . 'chatshop_whatsapp_messages',
+            'templates' => $wpdb->prefix . 'chatshop_whatsapp_templates',
+            'webhooks' => $wpdb->prefix . 'chatshop_whatsapp_webhooks',
+            'campaigns' => $wpdb->prefix . 'chatshop_whatsapp_campaigns'
+        );
+    }
 
-        /**
-         * API configuration
-         *
-         * @var array
-         * @since 1.0.0
-         */
-        private $config;
+    /**
+     * Load API credentials from settings
+     *
+     * @since 1.0.0
+     */
+    private function load_credentials()
+    {
+        $this->credentials = array(
+            'access_token' => chatshop_get_option('whatsapp', 'access_token', ''),
+            'phone_number_id' => chatshop_get_option('whatsapp', 'phone_number_id', ''),
+            'webhook_verify_token' => chatshop_get_option('whatsapp', 'webhook_verify_token', ''),
+            'business_account_id' => chatshop_get_option('whatsapp', 'business_account_id', '')
+        );
+    }
 
-        /**
-         * Rate limiting settings
-         *
-         * @var array
-         * @since 1.0.0
-         */
-        private $rate_limits = array(
-            'messages_per_hour' => 1000,
-            'messages_per_day' => 10000,
-            'delay_between_messages' => 1, // seconds
+    /**
+     * Initialize WordPress hooks
+     *
+     * @since 1.0.0
+     */
+    private function init_hooks()
+    {
+        // REST API endpoint for webhooks
+        add_action('rest_api_init', array($this, 'register_webhook_endpoint'));
+
+        // AJAX handlers
+        add_action('wp_ajax_chatshop_send_whatsapp_message', array($this, 'ajax_send_message'));
+        add_action('wp_ajax_chatshop_test_whatsapp_connection', array($this, 'ajax_test_connection'));
+        add_action('wp_ajax_chatshop_sync_templates', array($this, 'ajax_sync_templates'));
+        add_action('wp_ajax_chatshop_get_message_history', array($this, 'ajax_get_message_history'));
+
+        // Scheduled tasks
+        add_action('chatshop_hourly_message_status_update', array($this, 'update_message_statuses'));
+        add_action('chatshop_daily_whatsapp_cleanup', array($this, 'cleanup_old_messages'));
+
+        // Schedule tasks if not already scheduled
+        if (!wp_next_scheduled('chatshop_hourly_message_status_update')) {
+            wp_schedule_event(time(), 'hourly', 'chatshop_hourly_message_status_update');
+        }
+
+        if (!wp_next_scheduled('chatshop_daily_whatsapp_cleanup')) {
+            wp_schedule_event(time(), 'daily', 'chatshop_daily_whatsapp_cleanup');
+        }
+
+        // Payment integration hooks
+        add_action('chatshop_payment_link_generated', array($this, 'send_payment_link_message'), 10, 3);
+        add_action('chatshop_payment_completed', array($this, 'send_payment_confirmation'), 10, 2);
+    }
+
+    /**
+     * Component activation handler
+     *
+     * @since 1.0.0
+     * @return bool True on successful activation
+     */
+    protected function do_activation()
+    {
+        return $this->create_database_tables();
+    }
+
+    /**
+     * Component deactivation handler
+     *
+     * @since 1.0.0
+     * @return bool True on successful deactivation
+     */
+    protected function do_deactivation()
+    {
+        // Clear scheduled events
+        wp_clear_scheduled_hook('chatshop_hourly_message_status_update');
+        wp_clear_scheduled_hook('chatshop_daily_whatsapp_cleanup');
+
+        return true;
+    }
+
+    /**
+     * Create database tables for WhatsApp management
+     *
+     * @since 1.0.0
+     * @return bool True if tables created successfully
+     */
+    private function create_database_tables()
+    {
+        global $wpdb;
+
+        $charset_collate = $wpdb->get_charset_collate();
+
+        // Messages table
+        $messages_table = "CREATE TABLE {$this->tables['messages']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            message_id varchar(100),
+            contact_id bigint(20),
+            phone varchar(20) NOT NULL,
+            message_type varchar(20) DEFAULT 'text',
+            content longtext,
+            template_name varchar(100),
+            template_language varchar(10),
+            template_params longtext,
+            direction varchar(10) DEFAULT 'outbound',
+            status varchar(20) DEFAULT 'pending',
+            error_message text,
+            campaign_id bigint(20),
+            scheduled_at datetime,
+            sent_at datetime,
+            delivered_at datetime,
+            read_at datetime,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY message_id (message_id),
+            KEY contact_id (contact_id),
+            KEY phone (phone),
+            KEY status (status),
+            KEY direction (direction),
+            KEY campaign_id (campaign_id),
+            KEY created_at (created_at)
+        ) $charset_collate;";
+
+        // Templates table
+        $templates_table = "CREATE TABLE {$this->tables['templates']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            template_id varchar(100) NOT NULL,
+            name varchar(100) NOT NULL,
+            language varchar(10) DEFAULT 'en',
+            category varchar(50),
+            status varchar(20) DEFAULT 'pending',
+            components longtext,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY unique_template (template_id, language),
+            KEY name (name),
+            KEY status (status),
+            KEY category (category)
+        ) $charset_collate;";
+
+        // Webhooks table
+        $webhooks_table = "CREATE TABLE {$this->tables['webhooks']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            webhook_id varchar(100),
+            event_type varchar(50) NOT NULL,
+            payload longtext,
+            processed tinyint(1) DEFAULT 0,
+            processed_at datetime,
+            error_message text,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY webhook_id (webhook_id),
+            KEY event_type (event_type),
+            KEY processed (processed),
+            KEY created_at (created_at)
+        ) $charset_collate;";
+
+        // Campaigns table
+        $campaigns_table = "CREATE TABLE {$this->tables['campaigns']} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            name varchar(200) NOT NULL,
+            description text,
+            type varchar(50) DEFAULT 'broadcast',
+            status varchar(20) DEFAULT 'draft',
+            template_id varchar(100),
+            target_groups longtext,
+            target_contacts longtext,
+            schedule_type varchar(20) DEFAULT 'immediate',
+            scheduled_at datetime,
+            message_content longtext,
+            stats longtext,
+            created_by bigint(20),
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY status (status),
+            KEY type (type),
+            KEY created_by (created_by),
+            KEY scheduled_at (scheduled_at)
+        ) $charset_collate;";
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+
+        $results = array(
+            dbDelta($messages_table),
+            dbDelta($templates_table),
+            dbDelta($webhooks_table),
+            dbDelta($campaigns_table)
         );
 
-        /**
-         * Session data
-         *
-         * @var array
-         * @since 1.0.0
-         */
-        private $session;
+        chatshop_log('WhatsApp Manager database tables created', 'info', array('results' => $results));
 
-        /**
-         * Premium features status
-         *
-         * @var array
-         * @since 1.0.0
-         */
-        private $premium_features;
+        return true;
+    }
 
-        /**
-         * Message templates instance
-         *
-         * @var ChatShop_Message_Templates
-         * @since 1.0.0
-         */
-        private $templates;
-
-        /**
-         * Contact manager instance
-         *
-         * @var ChatShop_Contact_Manager
-         * @since 1.0.0
-         */
-        private $contact_manager;
-
-        /**
-         * Constructor
-         *
-         * @since 1.0.0
-         */
-        public function __construct()
-        {
-            $this->load_config();
-            $this->init_session();
-            $this->init_premium_features();
-            $this->init_components();
+    /**
+     * Verify API connection
+     *
+     * @since 1.0.0
+     * @return bool True if connected, false otherwise
+     */
+    private function verify_connection()
+    {
+        if (empty($this->credentials['access_token']) || empty($this->credentials['phone_number_id'])) {
+            $this->is_connected = false;
+            return false;
         }
 
-        /**
-         * Initialize component dependencies
-         *
-         * @since 1.0.0
-         */
-        private function init_components()
-        {
-            if (class_exists('ChatShop\ChatShop_Message_Templates')) {
-                $this->templates = new ChatShop_Message_Templates();
+        try {
+            $response = $this->make_api_request('GET', $this->credentials['phone_number_id']);
+            $this->is_connected = !is_wp_error($response);
+
+            if ($this->is_connected) {
+                chatshop_log('WhatsApp API connection verified', 'info');
+            } else {
+                chatshop_log('WhatsApp API connection failed', 'warning', array(
+                    'error' => $response->get_error_message()
+                ));
             }
 
-            if (class_exists('ChatShop\ChatShop_Contact_Manager')) {
-                $this->contact_manager = new ChatShop_Contact_Manager();
-            }
-        }
-
-        /**
-         * Load API configuration
-         *
-         * @since 1.0.0
-         */
-        private function load_config()
-        {
-            $options = get_option('chatshop_whatsapp_options', array());
-
-            $this->config = array(
-                'enabled' => isset($options['enabled']) ? (bool) $options['enabled'] : false,
-                'api_type' => $options['api_type'] ?? 'business', // 'business' or 'web'
-                'phone_number_id' => $options['phone_number_id'] ?? '',
-                'access_token' => $this->decrypt_token($options['access_token'] ?? ''),
-                'verify_token' => $options['verify_token'] ?? '',
-                'app_id' => $options['app_id'] ?? '',
-                'app_secret' => $this->decrypt_token($options['app_secret'] ?? ''),
-                'webhook_url' => $options['webhook_url'] ?? '',
-                'fallback_enabled' => isset($options['fallback_enabled']) ? (bool) $options['fallback_enabled'] : true,
-            );
-        }
-
-        /**
-         * Initialize session management
-         *
-         * @since 1.0.0
-         */
-        private function init_session()
-        {
-            $this->session = array(
-                'active' => false,
-                'last_activity' => 0,
-                'message_count_hour' => 0,
-                'message_count_day' => 0,
-                'last_reset_hour' => 0,
-                'last_reset_day' => 0,
-            );
-
-            // Load session from transients
-            $stored_session = get_transient('chatshop_whatsapp_session');
-            if ($stored_session) {
-                $this->session = array_merge($this->session, $stored_session);
-            }
-        }
-
-        /**
-         * Initialize premium features
-         *
-         * @since 1.0.0
-         */
-        private function init_premium_features()
-        {
-            $license_status = get_option('chatshop_license_status', 'free');
-            $premium_options = get_option('chatshop_premium_options', array());
-
-            $this->premium_features = array(
-                'bulk_messaging' => $license_status !== 'free' &&
-                    isset($premium_options['whatsapp_bulk_messaging']) &&
-                    $premium_options['whatsapp_bulk_messaging'],
-                'templates' => $license_status !== 'free',
-                'media_messages' => $license_status !== 'free',
-                'automation' => $license_status !== 'free' &&
-                    isset($premium_options['whatsapp_automation']) &&
-                    $premium_options['whatsapp_automation'],
-            );
-        }
-
-        /**
-         * Send message via WhatsApp
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number (with country code)
-         * @param string $message Message content
-         * @param string $type Message type ('text', 'template', 'media')
-         * @param array  $options Additional options
-         * @return array Result array with success status and message
-         */
-        public function send_message($phone, $message, $type = 'text', $options = array())
-        {
-            if (!$this->config['enabled']) {
-                return array(
-                    'success' => false,
-                    'message' => __('WhatsApp integration is disabled', 'chatshop'),
-                );
-            }
-
-            // Validate phone number
-            $phone = $this->format_phone_number($phone);
-            if (!$phone) {
-                return array(
-                    'success' => false,
-                    'message' => __('Invalid phone number format', 'chatshop'),
-                );
-            }
-
-            // Check rate limits
-            $rate_check = $this->check_rate_limits();
-            if (!$rate_check['allowed']) {
-                return array(
-                    'success' => false,
-                    'message' => $rate_check['message'],
-                );
-            }
-
-            // Send via Business API first, fallback to Web API if needed
-            $result = $this->send_via_business_api($phone, $message, $type, $options);
-
-            if (!$result['success'] && $this->config['fallback_enabled']) {
-                chatshop_log('Business API failed, trying Web API fallback', 'warning');
-                $result = $this->send_via_web_api($phone, $message, $options);
-            }
-
-            // Update rate limiting counters
-            if ($result['success']) {
-                $this->update_rate_counters();
-
-                // Update contact opt-in status if contact manager is available
-                if ($this->contact_manager) {
-                    $this->contact_manager->update_opt_in_status($phone, true);
-                }
-            }
-
-            // Log the attempt
-            $this->log_message_attempt($phone, $message, $type, $result);
-
-            return $result;
-        }
-
-        /**
-         * Send product notification
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param int    $product_id WooCommerce product ID
-         * @param string $event Event type ('new_product', 'price_drop', 'back_in_stock')
-         * @return array Result array
-         */
-        public function send_product_notification($phone, $product_id, $event = 'new_product')
-        {
-            $product = wc_get_product($product_id);
-            if (!$product) {
-                return array(
-                    'success' => false,
-                    'message' => __('Product not found', 'chatshop'),
-                );
-            }
-
-            $message = $this->format_product_message($product, $event);
-            $options = array(
-                'product_id' => $product_id,
-                'event' => $event,
-            );
-
-            return $this->send_message($phone, $message, 'text', $options);
-        }
-
-        /**
-         * Send template message (premium feature)
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $template_name Template name
-         * @param array  $parameters Template parameters
-         * @return array Result array
-         */
-        public function send_template_message($phone, $template_name, $parameters = array())
-        {
-            if (!$this->premium_features['templates']) {
-                return array(
-                    'success' => false,
-                    'message' => __('Template messages are a premium feature', 'chatshop'),
-                );
-            }
-
-            $template_data = array(
-                'name' => $template_name,
-                'language' => array('code' => 'en'),
-                'components' => $this->build_template_components($parameters),
-            );
-
-            return $this->send_message($phone, '', 'template', array('template' => $template_data));
-        }
-
-        /**
-         * Send bulk messages (premium feature)
-         *
-         * @since 1.0.0
-         * @param array  $contacts Array of phone numbers
-         * @param string $message Message content
-         * @param string $type Message type
-         * @return array Result array with individual results
-         */
-        public function send_bulk_messages($contacts, $message, $type = 'text')
-        {
-            if (!$this->premium_features['bulk_messaging']) {
-                return array(
-                    'success' => false,
-                    'message' => __('Bulk messaging is a premium feature', 'chatshop'),
-                );
-            }
-
-            $results = array();
-            $success_count = 0;
-            $failed_count = 0;
-
-            foreach ($contacts as $phone) {
-                $result = $this->send_message($phone, $message, $type);
-
-                $results[] = array(
-                    'phone' => $phone,
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                );
-
-                if ($result['success']) {
-                    $success_count++;
-                } else {
-                    $failed_count++;
-                }
-
-                // Rate limiting delay
-                sleep($this->rate_limits['delay_between_messages']);
-            }
-
-            return array(
-                'success' => $success_count > 0,
-                'total' => count($contacts),
-                'success_count' => $success_count,
-                'failed_count' => $failed_count,
-                'results' => $results,
-            );
-        }
-
-        /**
-         * Send cart abandonment recovery message (premium feature)
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $cart_token Cart token
-         * @param array  $cart_data Cart data
-         * @return array Result array
-         */
-        public function send_cart_recovery_message($phone, $cart_token, $cart_data)
-        {
-            if (!$this->premium_features['automation']) {
-                return array(
-                    'success' => false,
-                    'message' => __('Cart recovery is a premium feature', 'chatshop'),
-                );
-            }
-
-            $message = $this->format_cart_recovery_message($cart_data, $cart_token);
-
-            return $this->send_message($phone, $message, 'text', array(
-                'cart_token' => $cart_token,
-                'type' => 'cart_recovery',
-            ));
-        }
-
-        /**
-         * Send media message (premium feature)
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $media_url Media URL
-         * @param string $media_type Media type ('image', 'video', 'document')
-         * @param string $caption Optional caption
-         * @return array Result array
-         */
-        public function send_media_message($phone, $media_url, $media_type, $caption = '')
-        {
-            if (!$this->premium_features['media_messages']) {
-                return array(
-                    'success' => false,
-                    'message' => __('Media messages are a premium feature', 'chatshop'),
-                );
-            }
-
-            $options = array(
-                'media_url' => $media_url,
-                'media_type' => $media_type,
-                'caption' => $caption,
-            );
-
-            return $this->send_message($phone, $caption, 'media', $options);
-        }
-
-        /**
-         * Send message via WhatsApp Business API
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $message Message content
-         * @param string $type Message type
-         * @param array  $options Additional options
-         * @return array Result array
-         */
-        private function send_via_business_api($phone, $message, $type, $options)
-        {
-            if (empty($this->config['access_token']) || empty($this->config['phone_number_id'])) {
-                return array(
-                    'success' => false,
-                    'message' => __('WhatsApp Business API not configured', 'chatshop'),
-                );
-            }
-
-            $url = $this->business_api_url . $this->config['phone_number_id'] . '/messages';
-            $headers = array(
-                'Authorization' => 'Bearer ' . $this->config['access_token'],
-                'Content-Type' => 'application/json',
-            );
-
-            $body = $this->build_message_payload($phone, $message, $type, $options);
-
-            $response = wp_remote_post($url, array(
-                'headers' => $headers,
-                'body' => wp_json_encode($body),
-                'timeout' => 30,
-            ));
-
-            return $this->process_api_response($response, 'business');
-        }
-
-        /**
-         * Send message via WhatsApp Web API (fallback)
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $message Message content
-         * @param array  $options Additional options
-         * @return array Result array
-         */
-        private function send_via_web_api($phone, $message, $options)
-        {
-            $web_url = add_query_arg(array(
-                'phone' => $phone,
-                'text' => urlencode($message),
-            ), $this->web_api_url);
-
-            // For Web API, we can only generate the URL and log it
-            // Actual sending would require user interaction
-            chatshop_log("Web API URL generated: {$web_url}", 'info');
-
-            return array(
-                'success' => true,
-                'message' => __('WhatsApp Web URL generated', 'chatshop'),
-                'web_url' => $web_url,
-            );
-        }
-
-        /**
-         * Build message payload for Business API
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $message Message content
-         * @param string $type Message type
-         * @param array  $options Additional options
-         * @return array Message payload
-         */
-        private function build_message_payload($phone, $message, $type, $options)
-        {
-            $payload = array(
-                'messaging_product' => 'whatsapp',
-                'to' => $phone,
-            );
-
-            switch ($type) {
-                case 'template':
-                    $payload['type'] = 'template';
-                    $payload['template'] = $options['template'];
-                    break;
-
-                case 'media':
-                    $media_type = $options['media_type'] ?? 'image';
-                    $payload['type'] = $media_type;
-                    $payload[$media_type] = array(
-                        'link' => $options['media_url'],
-                    );
-
-                    if (!empty($options['caption'])) {
-                        $payload[$media_type]['caption'] = $options['caption'];
-                    }
-                    break;
-
-                case 'text':
-                default:
-                    $payload['type'] = 'text';
-                    $payload['text'] = array('body' => $message);
-                    break;
-            }
-
-            return $payload;
-        }
-
-        /**
-         * Build template components
-         *
-         * @since 1.0.0
-         * @param array $parameters Template parameters
-         * @return array Template components
-         */
-        private function build_template_components($parameters)
-        {
-            if (empty($parameters)) {
-                return array();
-            }
-
-            $components = array();
-
-            // Header parameters
-            if (isset($parameters['header'])) {
-                $components[] = array(
-                    'type' => 'header',
-                    'parameters' => $parameters['header'],
-                );
-            }
-
-            // Body parameters
-            if (isset($parameters['body'])) {
-                $components[] = array(
-                    'type' => 'body',
-                    'parameters' => $parameters['body'],
-                );
-            }
-
-            // Button parameters
-            if (isset($parameters['buttons'])) {
-                $components[] = array(
-                    'type' => 'button',
-                    'sub_type' => 'quick_reply',
-                    'index' => '0',
-                    'parameters' => $parameters['buttons'],
-                );
-            }
-
-            return $components;
-        }
-
-        /**
-         * Process API response
-         *
-         * @since 1.0.0
-         * @param array|WP_Error $response API response
-         * @param string         $api_type API type ('business' or 'web')
-         * @return array Result array
-         */
-        private function process_api_response($response, $api_type)
-        {
-            if (is_wp_error($response)) {
-                return array(
-                    'success' => false,
-                    'message' => sprintf(__('API request failed: %s', 'chatshop'), $response->get_error_message()),
-                );
-            }
-
-            $code = wp_remote_retrieve_response_code($response);
-            $body = wp_remote_retrieve_body($response);
-            $data = json_decode($body, true);
-
-            if ($code >= 200 && $code < 300) {
-                $message_id = '';
-
-                if ($api_type === 'business' && isset($data['messages'][0]['id'])) {
-                    $message_id = $data['messages'][0]['id'];
-                }
-
-                return array(
-                    'success' => true,
-                    'message' => __('Message sent successfully', 'chatshop'),
-                    'message_id' => $message_id,
-                    'api_type' => $api_type,
-                );
-            }
-
-            $error_message = __('Failed to send message', 'chatshop');
-
-            if (isset($data['error']['message'])) {
-                $error_message = $data['error']['message'];
-            }
-
-            return array(
-                'success' => false,
-                'message' => $error_message,
-                'error_code' => $code,
-                'api_type' => $api_type,
-            );
-        }
-
-        /**
-         * Check rate limits
-         *
-         * @since 1.0.0
-         * @return array Rate limit check result
-         */
-        private function check_rate_limits()
-        {
-            $current_time = time();
-            $current_hour = gmdate('H', $current_time);
-            $current_day = gmdate('Y-m-d', $current_time);
-
-            // Reset hourly counter
-            if ($this->session['last_reset_hour'] !== $current_hour) {
-                $this->session['message_count_hour'] = 0;
-                $this->session['last_reset_hour'] = $current_hour;
-            }
-
-            // Reset daily counter
-            if ($this->session['last_reset_day'] !== $current_day) {
-                $this->session['message_count_day'] = 0;
-                $this->session['last_reset_day'] = $current_day;
-            }
-
-            // Check hourly limit
-            if ($this->session['message_count_hour'] >= $this->rate_limits['messages_per_hour']) {
-                return array(
-                    'allowed' => false,
-                    'message' => __('Hourly message limit exceeded', 'chatshop'),
-                );
-            }
-
-            // Check daily limit
-            if ($this->session['message_count_day'] >= $this->rate_limits['messages_per_day']) {
-                return array(
-                    'allowed' => false,
-                    'message' => __('Daily message limit exceeded', 'chatshop'),
-                );
-            }
-
-            return array('allowed' => true);
-        }
-
-        /**
-         * Update rate limiting counters
-         *
-         * @since 1.0.0
-         */
-        private function update_rate_counters()
-        {
-            $this->session['message_count_hour']++;
-            $this->session['message_count_day']++;
-            $this->session['last_activity'] = time();
-
-            // Save session to transients
-            set_transient('chatshop_whatsapp_session', $this->session, DAY_IN_SECONDS);
-        }
-
-        /**
-         * Format phone number for WhatsApp
-         *
-         * @since 1.0.0
-         * @param string $phone Raw phone number
-         * @return string|false Formatted phone number or false if invalid
-         */
-        private function format_phone_number($phone)
-        {
-            if (empty($phone)) {
-                return false;
-            }
-
-            // Remove all non-numeric characters
-            $phone = preg_replace('/[^0-9]/', '', $phone);
-
-            // Remove leading zeros
-            $phone = ltrim($phone, '0');
-
-            // Add country code if not present (assuming Nigeria +234 as default)
-            if (strlen($phone) === 10) {
-                $phone = '234' . $phone;
-            }
-
-            // Validate phone number length
-            if (strlen($phone) < 10 || strlen($phone) > 15) {
-                return false;
-            }
-
-            return $phone;
-        }
-
-        /**
-         * Format product message
-         *
-         * @since 1.0.0
-         * @param WC_Product $product WooCommerce product
-         * @param string     $event Event type
-         * @return string Formatted message
-         */
-        private function format_product_message($product, $event)
-        {
-            $product_name = $product->get_name();
-            $product_price = $product->get_price_html();
-            $product_url = $product->get_permalink();
-
-            switch ($event) {
-                case 'new_product':
-                    return sprintf(
-                        __("🎉 New Product Alert!\n\n%s\nPrice: %s\n\nCheck it out: %s", 'chatshop'),
-                        $product_name,
-                        $product_price,
-                        $product_url
-                    );
-
-                case 'price_drop':
-                    return sprintf(
-                        __("💰 Price Drop Alert!\n\n%s\nNew Price: %s\n\nDon't miss out: %s", 'chatshop'),
-                        $product_name,
-                        $product_price,
-                        $product_url
-                    );
-
-                case 'back_in_stock':
-                    return sprintf(
-                        __("📦 Back in Stock!\n\n%s\nPrice: %s\n\nOrder now: %s", 'chatshop'),
-                        $product_name,
-                        $product_price,
-                        $product_url
-                    );
-
-                default:
-                    return sprintf(
-                        __("📢 Product Update!\n\n%s\nPrice: %s\n\nView details: %s", 'chatshop'),
-                        $product_name,
-                        $product_price,
-                        $product_url
-                    );
-            }
-        }
-
-        /**
-         * Format cart recovery message
-         *
-         * @since 1.0.0
-         * @param array  $cart_data Cart data
-         * @param string $cart_token Cart token
-         * @return string Formatted message
-         */
-        private function format_cart_recovery_message($cart_data, $cart_token)
-        {
-            $recovery_url = add_query_arg(array(
-                'chatshop_recover_cart' => $cart_token,
-            ), wc_get_cart_url());
-
-            $item_count = count($cart_data['items'] ?? array());
-            $total = $cart_data['total'] ?? '';
-
-            return sprintf(
-                __("🛒 You left %d item(s) in your cart!\n\nTotal: %s\n\nComplete your purchase:\n%s\n\n⏰ Limited time - don't miss out!", 'chatshop'),
-                $item_count,
-                $total,
-                $recovery_url
-            );
-        }
-
-        /**
-         * Log message attempt
-         *
-         * @since 1.0.0
-         * @param string $phone Phone number
-         * @param string $message Message content
-         * @param string $type Message type
-         * @param array  $result Send result
-         */
-        private function log_message_attempt($phone, $message, $type, $result)
-        {
-            $log_data = array(
-                'phone' => $phone,
-                'type' => $type,
-                'success' => $result['success'],
-                'api_type' => $result['api_type'] ?? 'unknown',
-                'message_id' => $result['message_id'] ?? '',
-                'error' => $result['success'] ? '' : $result['message'],
-            );
-
-            chatshop_log("WhatsApp message attempt: " . wp_json_encode($log_data), 'info');
-        }
-
-        /**
-         * Decrypt token/secret
-         *
-         * @since 1.0.0
-         * @param string $encrypted_token Encrypted token
-         * @return string Decrypted token
-         */
-        private function decrypt_token($encrypted_token)
-        {
-            if (empty($encrypted_token)) {
-                return '';
-            }
-
-            $encryption_key = wp_salt('auth');
-            $decrypted = openssl_decrypt(
-                $encrypted_token,
-                'AES-256-CBC',
-                $encryption_key,
-                0,
-                substr($encryption_key, 0, 16)
-            );
-
-            return $decrypted !== false ? $decrypted : '';
-        }
-
-        /**
-         * Verify webhook signature
-         *
-         * @since 1.0.0
-         * @param string $payload Webhook payload
-         * @param string $signature Webhook signature
-         * @return bool Whether signature is valid
-         */
-        public function verify_webhook_signature($payload, $signature)
-        {
-            if (empty($this->config['app_secret'])) {
-                return false;
-            }
-
-            $expected_signature = hash_hmac('sha256', $payload, $this->config['app_secret']);
-
-            return hash_equals('sha256=' . $expected_signature, $signature);
-        }
-
-        /**
-         * Process webhook payload
-         *
-         * @since 1.0.0
-         * @param array $payload Webhook payload
-         * @return array Processing result
-         */
-        public function process_webhook($payload)
-        {
-            if (!isset($payload['entry']) || !is_array($payload['entry'])) {
-                return array(
-                    'success' => false,
-                    'message' => __('Invalid webhook payload', 'chatshop'),
-                );
-            }
-
-            $processed = 0;
-
-            foreach ($payload['entry'] as $entry) {
-                if (isset($entry['changes'])) {
-                    foreach ($entry['changes'] as $change) {
-                        if ($change['field'] === 'messages') {
-                            $this->process_message_status_change($change['value']);
-                            $processed++;
-                        }
-                    }
-                }
-            }
-
-            return array(
-                'success' => true,
-                'message' => sprintf(__('Processed %d webhook events', 'chatshop'), $processed),
-            );
-        }
-
-        /**
-         * Process message status change from webhook
-         *
-         * @since 1.0.0
-         * @param array $data Message status data
-         */
-        private function process_message_status_change($data)
-        {
-            if (!isset($data['statuses'])) {
-                return;
-            }
-
-            foreach ($data['statuses'] as $status) {
-                $message_id = $status['id'] ?? '';
-                $status_type = $status['status'] ?? '';
-                $timestamp = $status['timestamp'] ?? time();
-
-                // Update message status in database
-                global $wpdb;
-
-                $wpdb->update(
-                    $wpdb->prefix . 'chatshop_whatsapp_logs',
-                    array(
-                        'status' => $status_type,
-                        'updated_at' => gmdate('Y-m-d H:i:s', $timestamp),
-                    ),
-                    array('message_id' => $message_id),
-                    array('%s', '%s'),
-                    array('%s')
-                );
-
-                chatshop_log("Message status updated: {$message_id} -> {$status_type}", 'info');
-            }
-        }
-
-        /**
-         * Get API configuration
-         *
-         * @since 1.0.0
-         * @return array API configuration
-         */
-        public function get_config()
-        {
-            // Return config without sensitive data
-            $safe_config = $this->config;
-            unset($safe_config['access_token'], $safe_config['app_secret']);
-
-            return $safe_config;
-        }
-
-        /**
-         * Get rate limit status
-         *
-         * @since 1.0.0
-         * @return array Rate limit status
-         */
-        public function get_rate_limit_status()
-        {
-            return array(
-                'hourly_used' => $this->session['message_count_hour'],
-                'hourly_limit' => $this->rate_limits['messages_per_hour'],
-                'daily_used' => $this->session['message_count_day'],
-                'daily_limit' => $this->rate_limits['messages_per_day'],
-                'last_activity' => $this->session['last_activity'],
-            );
-        }
-
-        /**
-         * Test API connection
-         *
-         * @since 1.0.0
-         * @return array Test result
-         */
-        public function test_connection()
-        {
-            if (!$this->config['enabled']) {
-                return array(
-                    'success' => false,
-                    'message' => __('WhatsApp integration is disabled', 'chatshop'),
-                );
-            }
-
-            if ($this->config['api_type'] === 'business') {
-                return $this->test_business_api();
-            }
-
-            return array(
-                'success' => true,
-                'message' => __('Web API configuration looks good', 'chatshop'),
-            );
-        }
-
-        /**
-         * Test Business API connection
-         *
-         * @since 1.0.0
-         * @return array Test result
-         */
-        private function test_business_api()
-        {
-            if (empty($this->config['access_token']) || empty($this->config['phone_number_id'])) {
-                return array(
-                    'success' => false,
-                    'message' => __('Missing Business API credentials', 'chatshop'),
-                );
-            }
-
-            $url = $this->business_api_url . $this->config['phone_number_id'];
-            $headers = array(
-                'Authorization' => 'Bearer ' . $this->config['access_token'],
-            );
-
-            $response = wp_remote_get($url, array(
-                'headers' => $headers,
-                'timeout' => 15,
-            ));
-
-            if (is_wp_error($response)) {
-                return array(
-                    'success' => false,
-                    'message' => sprintf(__('Connection failed: %s', 'chatshop'), $response->get_error_message()),
-                );
-            }
-
-            $code = wp_remote_retrieve_response_code($response);
-
-            if ($code === 200) {
-                return array(
-                    'success' => true,
-                    'message' => __('Business API connection successful', 'chatshop'),
-                );
-            }
-
-            return array(
-                'success' => false,
-                'message' => sprintf(__('API returned error code: %d', 'chatshop'), $code),
-            );
+            return $this->is_connected;
+        } catch (Exception $e) {
+            $this->is_connected = false;
+            chatshop_log('WhatsApp API connection error: ' . $e->getMessage(), 'error');
+            return false;
         }
     }
+
+    /**
+     * Make API request to WhatsApp Business API
+     *
+     * @since 1.0.0
+     * @param string $method HTTP method
+     * @param string $endpoint API endpoint
+     * @param array $data Request data
+     * @return array|WP_Error Response data or error
+     */
+    private function make_api_request($method, $endpoint, $data = array())
+    {
+        if (empty($this->credentials['access_token'])) {
+            return new \WP_Error('no_access_token', __('WhatsApp access token not configured', 'chatshop'));
+        }
+
+        $url = $this->api_base_url . $endpoint;
+
+        $args = array(
+            'method' => $method,
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $this->credentials['access_token'],
+                'Content-Type' => 'application/json'
+            ),
+            'timeout' => 30
+        );
+
+        if (!empty($data) && in_array($method, array('POST', 'PUT', 'PATCH'))) {
+            $args['body'] = wp_json_encode($data);
+        }
+
+        $response = wp_remote_request($url, $args);
+
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $status_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $decoded_body = json_decode($body, true);
+
+        if ($status_code >= 400) {
+            $error_message = isset($decoded_body['error']['message']) ?
+                $decoded_body['error']['message'] :
+                __('API request failed', 'chatshop');
+
+            return new \WP_Error('api_error', $error_message, array(
+                'status_code' => $status_code,
+                'response' => $decoded_body
+            ));
+        }
+
+        return $decoded_body;
+    }
+
+    /**
+     * Send a WhatsApp message
+     *
+     * @since 1.0.0
+     * @param string $phone Recipient phone number
+     * @param array $message_data Message data
+     * @param int $contact_id Contact ID (optional)
+     * @param int $campaign_id Campaign ID (optional)
+     * @return array|WP_Error Message result or error
+     */
+    public function send_message($phone, $message_data, $contact_id = null, $campaign_id = null)
+    {
+        if (!$this->is_connected) {
+            return new \WP_Error('not_connected', __('WhatsApp API not connected', 'chatshop'));
+        }
+
+        // Sanitize phone number
+        $phone = chatshop_sanitize_phone($phone);
+        if (!chatshop_validate_phone($phone)) {
+            return new \WP_Error('invalid_phone', __('Invalid phone number format', 'chatshop'));
+        }
+
+        // Prepare message data
+        $api_message_data = array(
+            'messaging_product' => 'whatsapp',
+            'to' => $phone,
+            'type' => $message_data['type'] ?? 'text'
+        );
+
+        // Handle different message types
+        switch ($api_message_data['type']) {
+            case 'text':
+                $api_message_data['text'] = array(
+                    'body' => $message_data['text'] ?? ''
+                );
+                break;
+
+            case 'template':
+                $api_message_data['template'] = array(
+                    'name' => $message_data['template']['name'] ?? '',
+                    'language' => array(
+                        'code' => $message_data['template']['language'] ?? 'en'
+                    )
+                );
+
+                if (!empty($message_data['template']['components'])) {
+                    $api_message_data['template']['components'] = $message_data['template']['components'];
+                }
+                break;
+
+            case 'image':
+            case 'video':
+            case 'document':
+                $api_message_data[$api_message_data['type']] = array(
+                    'link' => $message_data['media']['url'] ?? ''
+                );
+
+                if (!empty($message_data['media']['caption'])) {
+                    $api_message_data[$api_message_data['type']]['caption'] = $message_data['media']['caption'];
+                }
+                break;
+        }
+
+        // Store message in database first
+        $message_id = $this->store_message(array(
+            'phone' => $phone,
+            'contact_id' => $contact_id,
+            'message_type' => $api_message_data['type'],
+            'content' => wp_json_encode($message_data),
+            'template_name' => $message_data['template']['name'] ?? null,
+            'template_language' => $message_data['template']['language'] ?? null,
+            'template_params' => isset($message_data['template']['components']) ?
+                wp_json_encode($message_data['template']['components']) : null,
+            'direction' => 'outbound',
+            'status' => 'pending',
+            'campaign_id' => $campaign_id,
+            'created_at' => current_time('mysql')
+        ));
+
+        if (!$message_id) {
+            return new \WP_Error('storage_failed', __('Failed to store message in database', 'chatshop'));
+        }
+
+        // Send message via API
+        $response = $this->make_api_request('POST', $this->credentials['phone_number_id'] . '/messages', $api_message_data);
+
+        if (is_wp_error($response)) {
+            // Update message status to failed
+            $this->update_message_status($message_id, 'failed', $response->get_error_message());
+            return $response;
+        }
+
+        // Update message with API response
+        $whatsapp_message_id = $response['messages'][0]['id'] ?? null;
+        $this->update_message(array(
+            'id' => $message_id,
+            'message_id' => $whatsapp_message_id,
+            'status' => 'sent',
+            'sent_at' => current_time('mysql')
+        ));
+
+        // Track analytics
+        do_action('chatshop_whatsapp_message_sent', $message_data, $campaign_id);
+
+        chatshop_log("WhatsApp message sent to {$phone}", 'info', array(
+            'message_id' => $whatsapp_message_id,
+            'type' => $api_message_data['type']
+        ));
+
+        return array(
+            'success' => true,
+            'message_id' => $whatsapp_message_id,
+            'local_id' => $message_id
+        );
+    }
+
+    /**
+     * Send text message
+     *
+     * @since 1.0.0
+     * @param string $phone Recipient phone number
+     * @param string $text Message text
+     * @param int $contact_id Contact ID (optional)
+     * @return array|WP_Error Message result or error
+     */
+    public function send_text_message($phone, $text, $contact_id = null)
+    {
+        return $this->send_message($phone, array(
+            'type' => 'text',
+            'text' => $text
+        ), $contact_id);
+    }
+
+    /**
+     * Send template message
+     *
+     * @since 1.0.0
+     * @param string $phone Recipient phone number
+     * @param string $template_name Template name
+     * @param array $parameters Template parameters
+     * @param string $language Template language
+     * @param int $contact_id Contact ID (optional)
+     * @return array|WP_Error Message result or error
+     */
+    public function send_template_message($phone, $template_name, $parameters = array(), $language = 'en', $contact_id = null)
+    {
+        $template_data = array(
+            'name' => $template_name,
+            'language' => $language
+        );
+
+        if (!empty($parameters)) {
+            $template_data['components'] = array(
+                array(
+                    'type' => 'body',
+                    'parameters' => $parameters
+                )
+            );
+        }
+
+        return $this->send_message($phone, array(
+            'type' => 'template',
+            'template' => $template_data
+        ), $contact_id);
+    }
+
+    /**
+     * Send payment link message
+     *
+     * @since 1.0.0
+     * @param array $payment_data Payment data
+     * @param string $phone Customer phone number
+     * @param string $payment_url Payment URL
+     */
+    public function send_payment_link_message($payment_data, $phone, $payment_url)
+    {
+        $message = sprintf(
+            __("Hi! Your payment link is ready.\n\nAmount: %s\nDescription: %s\n\nClick here to pay: %s", 'chatshop'),
+            chatshop_format_price($payment_data['amount'], $payment_data['currency']),
+            $payment_data['description'] ?? __('Payment', 'chatshop'),
+            $payment_url
+        );
+
+        $this->send_text_message($phone, $message);
+    }
+
+    /**
+     * Send payment confirmation message
+     *
+     * @since 1.0.0
+     * @param array $payment_data Payment data
+     * @param int $order_id Order ID
+     */
+    public function send_payment_confirmation($payment_data, $order_id)
+    {
+        if (empty($payment_data['customer_phone'])) {
+            return;
+        }
+
+        $message = sprintf(
+            __("Thank you! Your payment has been received.\n\nAmount: %s\nTransaction ID: %s\n\nWe appreciate your business!", 'chatshop'),
+            chatshop_format_price($payment_data['amount'], $payment_data['currency']),
+            $payment_data['transaction_id'] ?? ''
+        );
+
+        $this->send_text_message($payment_data['customer_phone'], $message);
+    }
+
+    /**
+     * Store message in database
+     *
+     * @since 1.0.0
+     * @param array $message_data Message data
+     * @return int|false Message ID or false on failure
+     */
+    private function store_message($message_data)
+    {
+        global $wpdb;
+
+        $result = $wpdb->insert($this->tables['messages'], $message_data);
+
+        if ($result) {
+            return $wpdb->insert_id;
+        }
+
+        chatshop_log('Failed to store WhatsApp message', 'error', array(
+            'error' => $wpdb->last_error,
+            'data' => $message_data
+        ));
+
+        return false;
+    }
+
+    /**
+     * Update message in database
+     *
+     * @since 1.0.0
+     * @param array $message_data Message data with ID
+     * @return bool True on success, false on failure
+     */
+    private function update_message($message_data)
+    {
+        global $wpdb;
+
+        $message_id = $message_data['id'];
+        unset($message_data['id']);
+
+        $message_data['updated_at'] = current_time('mysql');
+
+        $result = $wpdb->update(
+            $this->tables['messages'],
+            $message_data,
+            array('id' => $message_id),
+            null,
+            array('%d')
+        );
+
+        return $result !== false;
+    }
+
+    /**
+     * Update message status
+     *
+     * @since 1.0.0
+     * @param int $message_id Message ID
+     * @param string $status New status
+     * @param string $error_message Error message (optional)
+     * @return bool True on success, false on failure
+     */
+    private function update_message_status($message_id, $status, $error_message = null)
+    {
+        $update_data = array(
+            'status' => $status,
+            'updated_at' => current_time('mysql')
+        );
+
+        if ($error_message) {
+            $update_data['error_message'] = $error_message;
+        }
+
+        // Set timestamp based on status
+        switch ($status) {
+            case 'delivered':
+                $update_data['delivered_at'] = current_time('mysql');
+                break;
+            case 'read':
+                $update_data['read_at'] = current_time('mysql');
+                break;
+        }
+
+        return $this->update_message(array_merge($update_data, array('id' => $message_id)));
+    }
+
+    /**
+     * Register webhook endpoint
+     *
+     * @since 1.0.0
+     */
+    public function register_webhook_endpoint()
+    {
+        register_rest_route('chatshop/v1', '/whatsapp/webhook', array(
+            'methods' => array('GET', 'POST'),
+            'callback' => array($this, 'handle_webhook'),
+            'permission_callback' => '__return_true',
+            'args' => array()
+        ));
+    }
+
+    /**
+     * Handle webhook requests
+     *
+     * @since 1.0.0
+     * @param WP_REST_Request $request Request object
+     * @return WP_REST_Response Response
+     */
+    public function handle_webhook($request)
+    {
+        $method = $request->get_method();
+
+        if ($method === 'GET') {
+            return $this->verify_webhook($request);
+        } elseif ($method === 'POST') {
+            return $this->process_webhook($request);
+        }
+
+        return new \WP_REST_Response(array('error' => 'Method not allowed'), 405);
+    }
+
+    /**
+     * Verify webhook (GET request)
+     *
+     * @since 1.0.0
+     * @param WP_REST_Request $request Request object
+     * @return WP_REST_Response Response
+     */
+    private function verify_webhook($request)
+    {
+        $mode = $request->get_param('hub_mode');
+        $token = $request->get_param('hub_verify_token');
+        $challenge = $request->get_param('hub_challenge');
+
+        if ($mode === 'subscribe' && $token === $this->credentials['webhook_verify_token']) {
+            chatshop_log('WhatsApp webhook verified successfully', 'info');
+            return new \WP_REST_Response($challenge, 200);
+        }
+
+        chatshop_log('WhatsApp webhook verification failed', 'warning', array(
+            'mode' => $mode,
+            'token' => $token
+        ));
+
+        return new \WP_REST_Response('Forbidden', 403);
+    }
+
+    /**
+     * Process webhook (POST request)
+     *
+     * @since 1.0.0
+     * @param WP_REST_Request $request Request object
+     * @return WP_REST_Response Response
+     */
+    private function process_webhook($request)
+    {
+        $body = $request->get_body();
+        $data = json_decode($body, true);
+
+        if (!$data || !isset($data['entry'])) {
+            return new \WP_REST_Response('Bad Request', 400);
+        }
+
+        // Store webhook for processing
+        $this->store_webhook($data);
+
+        // Process webhook data
+        foreach ($data['entry'] as $entry) {
+            if (isset($entry['changes'])) {
+                foreach ($entry['changes'] as $change) {
+                    $this->process_webhook_change($change);
+                }
+            }
+        }
+
+        return new \WP_REST_Response('OK', 200);
+    }
+
+    /**
+     * Store webhook data
+     *
+     * @since 1.0.0
+     * @param array $webhook_data Webhook data
+     * @return int|false Webhook ID or false on failure
+     */
+    private function store_webhook($webhook_data)
+    {
+        global $wpdb;
+
+        $webhook_id = $webhook_data['entry'][0]['id'] ?? uniqid();
+        $event_type = $this->determine_webhook_event_type($webhook_data);
+
+        $result = $wpdb->insert(
+            $this->tables['webhooks'],
+            array(
+                'webhook_id' => $webhook_id,
+                'event_type' => $event_type,
+                'payload' => wp_json_encode($webhook_data),
+                'processed' => 0,
+                'created_at' => current_time('mysql')
+            ),
+            array('%s', '%s', '%s', '%d', '%s')
+        );
+
+        return $result ? $wpdb->insert_id : false;
+    }
+
+    /**
+     * Determine webhook event type
+     *
+     * @since 1.0.0
+     * @param array $webhook_data Webhook data
+     * @return string Event type
+     */
+    private function determine_webhook_event_type($webhook_data)
+    {
+        $entry = $webhook_data['entry'][0] ?? array();
+        $changes = $entry['changes'][0] ?? array();
+        $value = $changes['value'] ?? array();
+
+        if (isset($value['messages'])) {
+            return 'message_received';
+        } elseif (isset($value['statuses'])) {
+            return 'message_status';
+        } elseif (isset($value['contacts'])) {
+            return 'contact_update';
+        }
+
+        return 'unknown';
+    }
+
+    /**
+     * Process webhook change
+     *
+     * @since 1.0.0
+     * @param array $change Webhook change data
+     */
+    private function process_webhook_change($change)
+    {
+        $value = $change['value'] ?? array();
+
+        // Process incoming messages
+        if (isset($value['messages'])) {
+            foreach ($value['messages'] as $message) {
+                $this->process_incoming_message($message, $value['contacts'][0] ?? array());
+            }
+        }
+
+        // Process message status updates
+        if (isset($value['statuses'])) {
+            foreach ($value['statuses'] as $status) {
+                $this->process_message_status_update($status);
+            }
+        }
+    }
+
+    /**
+     * Process incoming message
+     *
+     * @since 1.0.0
+     * @param array $message Message data
+     * @param array $contact Contact data
+     */
+    private function process_incoming_message($message, $contact)
+    {
+        $phone = $contact['wa_id'] ?? '';
+        $sender_name = $contact['profile']['name'] ?? $phone;
+
+        // Store incoming message
+        $message_id = $this->store_message(array(
+            'message_id' => $message['id'],
+            'phone' => $phone,
+            'message_type' => $message['type'],
+            'content' => wp_json_encode($message),
+            'direction' => 'inbound',
+            'status' => 'received',
+            'created_at' => current_time('mysql')
+        ));
+
+        // Trigger action for contact manager and other components
+        do_action('chatshop_whatsapp_message_received', array_merge($message, array(
+            'sender_name' => $sender_name
+        )), $phone);
+
+        chatshop_log("Incoming WhatsApp message from {$phone}", 'info', array(
+            'message_id' => $message['id'],
+            'type' => $message['type']
+        ));
+    }
+
+    /**
+     * Process message status update
+     *
+     * @since 1.0.0
+     * @param array $status Status data
+     */
+    private function process_message_status_update($status)
+    {
+        global $wpdb;
+
+        $message_id = $status['id'];
+        $new_status = $status['status'];
+        $recipient_id = $status['recipient_id'];
+
+        // Find local message record
+        $local_message = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$this->tables['messages']} WHERE message_id = %s",
+            $message_id
+        ));
+
+        if ($local_message) {
+            $this->update_message_status($local_message->id, $new_status);
+
+            // Trigger action for analytics
+            do_action('chatshop_whatsapp_status_update', $status, $recipient_id);
+
+            chatshop_log("Message status updated: {$message_id} -> {$new_status}", 'info');
+        }
+    }
+
+    /**
+     * Sync message templates from WhatsApp Business API
+     *
+     * @since 1.0.0
+     * @return array|WP_Error Sync results or error
+     */
+    public function sync_templates()
+    {
+        if (empty($this->credentials['business_account_id'])) {
+            return new \WP_Error('no_business_id', __('Business account ID not configured', 'chatshop'));
+        }
+
+        $response = $this->make_api_request('GET', $this->credentials['business_account_id'] . '/message_templates');
+
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $templates = $response['data'] ?? array();
+        $synced_count = 0;
+        $errors = array();
+
+        foreach ($templates as $template) {
+            if ($this->store_template($template)) {
+                $synced_count++;
+            } else {
+                $errors[] = "Failed to store template: {$template['name']}";
+            }
+        }
+
+        chatshop_log("Template sync completed: {$synced_count} templates synced", 'info');
+
+        return array(
+            'synced' => $synced_count,
+            'total' => count($templates),
+            'errors' => $errors
+        );
+    }
+
+    /**
+     * Store template in database
+     *
+     * @since 1.0.0
+     * @param array $template_data Template data from API
+     * @return bool True on success, false on failure
+     */
+    private function store_template($template_data)
+    {
+        global $wpdb;
+
+        $template_record = array(
+            'template_id' => $template_data['id'],
+            'name' => $template_data['name'],
+            'language' => $template_data['language'],
+            'category' => $template_data['category'],
+            'status' => $template_data['status'],
+            'components' => wp_json_encode($template_data['components'] ?? array()),
+            'updated_at' => current_time('mysql')
+        );
+
+        // Check if template exists
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT id FROM {$this->tables['templates']} WHERE template_id = %s AND language = %s",
+            $template_data['id'],
+            $template_data['language']
+        ));
+
+        if ($existing) {
+            // Update existing template
+            $result = $wpdb->update(
+                $this->tables['templates'],
+                $template_record,
+                array('id' => $existing->id),
+                null,
+                array('%d')
+            );
+        } else {
+            // Insert new template
+            $template_record['created_at'] = current_time('mysql');
+            $result = $wpdb->insert($this->tables['templates'], $template_record);
+        }
+
+        return $result !== false;
+    }
+
+    /**
+     * Get available templates
+     *
+     * @since 1.0.0
+     * @param string $status Template status filter
+     * @return array Templates
+     */
+    public function get_templates($status = 'approved')
+    {
+        global $wpdb;
+
+        $cache_key = "templates_{$status}";
+        if (isset($this->templates_cache[$cache_key])) {
+            return $this->templates_cache[$cache_key];
+        }
+
+        $where_clause = '';
+        $where_values = array();
+
+        if (!empty($status)) {
+            $where_clause = 'WHERE status = %s';
+            $where_values[] = $status;
+        }
+
+        $query = "SELECT * FROM {$this->tables['templates']} {$where_clause} ORDER BY name ASC";
+        $templates = $wpdb->get_results($wpdb->prepare($query, $where_values));
+
+        // Decode components JSON
+        foreach ($templates as $template) {
+            $template->components = json_decode($template->components, true);
+        }
+
+        $this->templates_cache[$cache_key] = $templates;
+        return $templates;
+    }
+
+    /**
+     * Get message history
+     *
+     * @since 1.0.0
+     * @param array $args Query arguments
+     * @return array Message history
+     */
+    public function get_message_history($args = array())
+    {
+        global $wpdb;
+
+        $defaults = array(
+            'phone' => '',
+            'contact_id' => 0,
+            'campaign_id' => 0,
+            'direction' => '', // inbound, outbound
+            'status' => '',
+            'limit' => 50,
+            'offset' => 0
+        );
+
+        $args = wp_parse_args($args, $defaults);
+
+        // Build WHERE clause
+        $where_conditions = array();
+        $where_values = array();
+
+        if (!empty($args['phone'])) {
+            $where_conditions[] = 'phone = %s';
+            $where_values[] = $args['phone'];
+        }
+
+        if (!empty($args['contact_id'])) {
+            $where_conditions[] = 'contact_id = %d';
+            $where_values[] = intval($args['contact_id']);
+        }
+
+        if (!empty($args['campaign_id'])) {
+            $where_conditions[] = 'campaign_id = %d';
+            $where_values[] = intval($args['campaign_id']);
+        }
+
+        if (!empty($args['direction'])) {
+            $where_conditions[] = 'direction = %s';
+            $where_values[] = $args['direction'];
+        }
+
+        if (!empty($args['status'])) {
+            $where_conditions[] = 'status = %s';
+            $where_values[] = $args['status'];
+        }
+
+        $where_clause = '';
+        if (!empty($where_conditions)) {
+            $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+        }
+
+        $limit = intval($args['limit']);
+        $offset = intval($args['offset']);
+
+        $query = "
+            SELECT * FROM {$this->tables['messages']} 
+            {$where_clause} 
+            ORDER BY created_at DESC 
+            LIMIT {$offset}, {$limit}
+        ";
+
+        $messages = $wpdb->get_results($wpdb->prepare($query, $where_values));
+
+        // Decode content JSON
+        foreach ($messages as $message) {
+            $message->content = json_decode($message->content, true);
+            $message->template_params = json_decode($message->template_params, true);
+        }
+
+        return $messages;
+    }
+
+    /**
+     * Update message statuses from API
+     *
+     * @since 1.0.0
+     */
+    public function update_message_statuses()
+    {
+        global $wpdb;
+
+        // Get messages that need status updates (sent but not delivered/read)
+        $messages = $wpdb->get_results(
+            "SELECT * FROM {$this->tables['messages']} 
+             WHERE direction = 'outbound' 
+             AND status IN ('sent', 'delivered') 
+             AND message_id IS NOT NULL 
+             AND sent_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) 
+             LIMIT 100"
+        );
+
+        foreach ($messages as $message) {
+            // In a real implementation, you would query the WhatsApp API for message status
+            // For now, we'll just log that we would check
+            chatshop_log("Would check status for message: {$message->message_id}", 'debug');
+        }
+    }
+
+    /**
+     * Cleanup old messages
+     *
+     * @since 1.0.0
+     */
+    public function cleanup_old_messages()
+    {
+        global $wpdb;
+
+        $retention_days = chatshop_get_option('whatsapp', 'message_retention_days', 90);
+        $cutoff_date = date('Y-m-d', strtotime("-{$retention_days} days"));
+
+        // Delete old messages
+        $deleted = $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$this->tables['messages']} WHERE DATE(created_at) < %s",
+            $cutoff_date
+        ));
+
+        // Delete old webhooks
+        $webhook_deleted = $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$this->tables['webhooks']} WHERE DATE(created_at) < %s",
+            $cutoff_date
+        ));
+
+        if ($deleted > 0 || $webhook_deleted > 0) {
+            chatshop_log("WhatsApp cleanup: {$deleted} messages, {$webhook_deleted} webhooks deleted", 'info');
+        }
+    }
+
+    /**
+     * Test API connection
+     *
+     * @since 1.0.0
+     * @return array Connection test results
+     */
+    public function test_connection()
+    {
+        $results = array(
+            'success' => false,
+            'message' => '',
+            'details' => array()
+        );
+
+        // Check credentials
+        if (empty($this->credentials['access_token'])) {
+            $results['message'] = __('Access token not configured', 'chatshop');
+            return $results;
+        }
+
+        if (empty($this->credentials['phone_number_id'])) {
+            $results['message'] = __('Phone number ID not configured', 'chatshop');
+            return $results;
+        }
+
+        // Test API connection
+        $response = $this->make_api_request('GET', $this->credentials['phone_number_id']);
+
+        if (is_wp_error($response)) {
+            $results['message'] = $response->get_error_message();
+            $results['details']['error_code'] = $response->get_error_code();
+            return $results;
+        }
+
+        $results['success'] = true;
+        $results['message'] = __('Connection successful', 'chatshop');
+        $results['details'] = array(
+            'phone_number' => $response['display_phone_number'] ?? '',
+            'verified_name' => $response['verified_name'] ?? '',
+            'status' => $response['account_mode'] ?? ''
+        );
+
+        return $results;
+    }
+
+    /**
+     * Get component status for admin display
+     *
+     * @since 1.0.0
+     * @return array Component status
+     */
+    public function get_status()
+    {
+        global $wpdb;
+
+        $status = array(
+            'active' => true,
+            'connected' => $this->is_connected,
+            'tables_exist' => true,
+            'total_messages' => 0,
+            'recent_messages' => 0,
+            'template_count' => 0,
+            'errors' => array()
+        );
+
+        // Check if tables exist
+        foreach ($this->tables as $table_name) {
+            if ($wpdb->get_var("SHOW TABLES LIKE '{$table_name}'") !== $table_name) {
+                $status['tables_exist'] = false;
+                $status['errors'][] = "Table {$table_name} does not exist";
+            }
+        }
+
+        if ($status['tables_exist']) {
+            // Get message statistics
+            $status['total_messages'] = intval($wpdb->get_var(
+                "SELECT COUNT(*) FROM {$this->tables['messages']}"
+            ));
+
+            $status['recent_messages'] = intval($wpdb->get_var(
+                "SELECT COUNT(*) FROM {$this->tables['messages']} 
+                 WHERE created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+            ));
+
+            $status['template_count'] = intval($wpdb->get_var(
+                "SELECT COUNT(*) FROM {$this->tables['templates']} WHERE status = 'approved'"
+            ));
+        }
+
+        if (!$this->is_connected) {
+            $status['errors'][] = 'WhatsApp API not connected';
+        }
+
+        return $status;
+    }
+
+    // AJAX Handlers
+
+    /**
+     * AJAX handler for sending message
+     *
+     * @since 1.0.0
+     */
+    public function ajax_send_message()
+    {
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $phone = sanitize_text_field($_POST['phone'] ?? '');
+        $message_type = sanitize_key($_POST['message_type'] ?? 'text');
+        $contact_id = intval($_POST['contact_id'] ?? 0);
+
+        try {
+            if ($message_type === 'text') {
+                $text = sanitize_textarea_field($_POST['text'] ?? '');
+                $result = $this->send_text_message($phone, $text, $contact_id ?: null);
+            } elseif ($message_type === 'template') {
+                $template_name = sanitize_text_field($_POST['template_name'] ?? '');
+                $template_params = $_POST['template_params'] ?? array();
+                $language = sanitize_text_field($_POST['language'] ?? 'en');
+
+                $result = $this->send_template_message($phone, $template_name, $template_params, $language, $contact_id ?: null);
+            } else {
+                throw new Exception(__('Unsupported message type', 'chatshop'));
+            }
+
+            if (is_wp_error($result)) {
+                wp_send_json_error(array('message' => $result->get_error_message()));
+            } else {
+                wp_send_json_success(array(
+                    'message' => __('Message sent successfully', 'chatshop'),
+                    'message_id' => $result['message_id']
+                ));
+            }
+        } catch (Exception $e) {
+            wp_send_json_error(array('message' => $e->getMessage()));
+        }
+    }
+
+    /**
+     * AJAX handler for testing connection
+     *
+     * @since 1.0.0
+     */
+    public function ajax_test_connection()
+    {
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $results = $this->test_connection();
+
+        if ($results['success']) {
+            wp_send_json_success($results);
+        } else {
+            wp_send_json_error($results);
+        }
+    }
+
+    /**
+     * AJAX handler for syncing templates
+     *
+     * @since 1.0.0
+     */
+    public function ajax_sync_templates()
+    {
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $results = $this->sync_templates();
+
+        if (is_wp_error($results)) {
+            wp_send_json_error(array('message' => $results->get_error_message()));
+        } else {
+            wp_send_json_success(array(
+                'message' => sprintf(__('%d templates synced successfully', 'chatshop'), $results['synced']),
+                'results' => $results
+            ));
+        }
+    }
+
+    /**
+     * AJAX handler for getting message history
+     *
+     * @since 1.0.0
+     */
+    public function ajax_get_message_history()
+    {
+        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_admin_nonce')) {
+            wp_die(__('Security check failed', 'chatshop'));
+        }
+
+        if (!current_user_can('manage_options')) {
+            wp_die(__('Insufficient permissions', 'chatshop'));
+        }
+
+        $args = array(
+            'phone' => sanitize_text_field($_POST['phone'] ?? ''),
+            'contact_id' => intval($_POST['contact_id'] ?? 0),
+            'limit' => intval($_POST['limit'] ?? 50),
+            'offset' => intval($_POST['offset'] ?? 0)
+        );
+
+        $messages = $this->get_message_history($args);
+        wp_send_json_success($messages);
+    }
+}

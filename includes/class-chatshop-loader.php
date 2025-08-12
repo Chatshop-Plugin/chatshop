@@ -1,9 +1,12 @@
 <?php
 
 /**
- * ChatShop Loader Class
+ * Loader Class
  *
- * Registers all actions and filters for the plugin.
+ * File: includes/class-chatshop-loader.php
+ * 
+ * Handles loading and registration of WordPress hooks and filters.
+ * This is the CORRECT file that should contain ChatShop_Loader class.
  *
  * @package ChatShop
  * @since 1.0.0
@@ -16,36 +19,46 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Prevent class redeclaration
+if (class_exists('ChatShop\\ChatShop_Loader')) {
+    return;
+}
+
 /**
  * ChatShop Loader Class
+ *
+ * Responsible for maintaining and registering all hooks that power the plugin.
  *
  * @since 1.0.0
  */
 class ChatShop_Loader
 {
     /**
-     * Array of actions registered with WordPress
+     * The array of actions registered with WordPress
      *
      * @var array
      * @since 1.0.0
      */
-    protected $actions = array();
+    protected $actions;
 
     /**
-     * Array of filters registered with WordPress
+     * The array of filters registered with WordPress
      *
      * @var array
      * @since 1.0.0
      */
-    protected $filters = array();
+    protected $filters;
 
     /**
-     * Array of shortcodes registered with WordPress
+     * Initialize the collections used to maintain the actions and filters
      *
-     * @var array
      * @since 1.0.0
      */
-    protected $shortcodes = array();
+    public function __construct()
+    {
+        $this->actions = array();
+        $this->filters = array();
+    }
 
     /**
      * Add a new action to the collection to be registered with WordPress
@@ -78,21 +91,7 @@ class ChatShop_Loader
     }
 
     /**
-     * Add a new shortcode to the collection to be registered with WordPress
-     *
-     * @since 1.0.0
-     * @param string $tag The name of the new shortcode
-     * @param object $component A reference to the instance of the object on which the shortcode is defined
-     * @param string $callback The name of the function that defines the shortcode
-     */
-    public function add_shortcode($tag, $component, $callback)
-    {
-        $this->shortcodes = $this->add($this->shortcodes, $tag, $component, $callback);
-    }
-
-    /**
-     * A utility function that is used to register the actions and hooks into a single
-     * collection
+     * A utility function that is used to register the actions and hooks into a single collection
      *
      * @since 1.0.0
      * @param array $hooks The collection of hooks that is being registered (that is, actions or filters)
@@ -103,7 +102,7 @@ class ChatShop_Loader
      * @param int $accepted_args The number of arguments that should be passed to the $callback
      * @return array The collection of actions and filters registered with WordPress
      */
-    private function add($hooks, $hook, $component, $callback, $priority = 10, $accepted_args = 1)
+    private function add($hooks, $hook, $component, $callback, $priority, $accepted_args)
     {
         $hooks[] = array(
             'hook' => $hook,
@@ -123,7 +122,7 @@ class ChatShop_Loader
      */
     public function run()
     {
-        // Register actions
+        // Register all actions
         foreach ($this->actions as $hook) {
             add_action(
                 $hook['hook'],
@@ -133,7 +132,7 @@ class ChatShop_Loader
             );
         }
 
-        // Register filters
+        // Register all filters
         foreach ($this->filters as $hook) {
             add_filter(
                 $hook['hook'],
@@ -142,21 +141,13 @@ class ChatShop_Loader
                 $hook['accepted_args']
             );
         }
-
-        // Register shortcodes
-        foreach ($this->shortcodes as $hook) {
-            add_shortcode(
-                $hook['hook'],
-                array($hook['component'], $hook['callback'])
-            );
-        }
     }
 
     /**
      * Get all registered actions
      *
      * @since 1.0.0
-     * @return array Registered actions
+     * @return array Array of registered actions
      */
     public function get_actions()
     {
@@ -167,22 +158,11 @@ class ChatShop_Loader
      * Get all registered filters
      *
      * @since 1.0.0
-     * @return array Registered filters
+     * @return array Array of registered filters
      */
     public function get_filters()
     {
         return $this->filters;
-    }
-
-    /**
-     * Get all registered shortcodes
-     *
-     * @since 1.0.0
-     * @return array Registered shortcodes
-     */
-    public function get_shortcodes()
-    {
-        return $this->shortcodes;
     }
 
     /**
@@ -191,12 +171,22 @@ class ChatShop_Loader
      * @since 1.0.0
      * @param string $hook The name of the WordPress action
      * @param object $component The component object
-     * @param string $callback The callback function name
-     * @return bool True if removed, false if not found
+     * @param string $callback The callback method name
+     * @return bool True if removed, false otherwise
      */
     public function remove_action($hook, $component, $callback)
     {
-        return $this->remove_hook($this->actions, $hook, $component, $callback);
+        foreach ($this->actions as $key => $action) {
+            if (
+                $action['hook'] === $hook &&
+                $action['component'] === $component &&
+                $action['callback'] === $callback
+            ) {
+                unset($this->actions[$key]);
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -205,158 +195,21 @@ class ChatShop_Loader
      * @since 1.0.0
      * @param string $hook The name of the WordPress filter
      * @param object $component The component object
-     * @param string $callback The callback function name
-     * @return bool True if removed, false if not found
+     * @param string $callback The callback method name
+     * @return bool True if removed, false otherwise
      */
     public function remove_filter($hook, $component, $callback)
     {
-        return $this->remove_hook($this->filters, $hook, $component, $callback);
-    }
-
-    /**
-     * Remove a shortcode from the collection
-     *
-     * @since 1.0.0
-     * @param string $tag The shortcode tag
-     * @param object $component The component object
-     * @param string $callback The callback function name
-     * @return bool True if removed, false if not found
-     */
-    public function remove_shortcode($tag, $component, $callback)
-    {
-        return $this->remove_hook($this->shortcodes, $tag, $component, $callback);
-    }
-
-    /**
-     * Remove a hook from the specified collection
-     *
-     * @since 1.0.0
-     * @param array &$hooks Reference to the hooks collection
-     * @param string $hook The hook name
-     * @param object $component The component object
-     * @param string $callback The callback function name
-     * @return bool True if removed, false if not found
-     */
-    private function remove_hook(&$hooks, $hook, $component, $callback)
-    {
-        foreach ($hooks as $key => $registered_hook) {
+        foreach ($this->filters as $key => $filter) {
             if (
-                $registered_hook['hook'] === $hook &&
-                $registered_hook['component'] === $component &&
-                $registered_hook['callback'] === $callback
+                $filter['hook'] === $hook &&
+                $filter['component'] === $component &&
+                $filter['callback'] === $callback
             ) {
-                unset($hooks[$key]);
+                unset($this->filters[$key]);
                 return true;
             }
         }
         return false;
-    }
-
-    /**
-     * Check if a specific hook is registered
-     *
-     * @since 1.0.0
-     * @param string $type Hook type ('action', 'filter', or 'shortcode')
-     * @param string $hook The hook name
-     * @param object $component The component object (optional)
-     * @param string $callback The callback function name (optional)
-     * @return bool True if registered, false otherwise
-     */
-    public function is_hook_registered($type, $hook, $component = null, $callback = null)
-    {
-        $hooks = array();
-
-        switch ($type) {
-            case 'action':
-                $hooks = $this->actions;
-                break;
-            case 'filter':
-                $hooks = $this->filters;
-                break;
-            case 'shortcode':
-                $hooks = $this->shortcodes;
-                break;
-            default:
-                return false;
-        }
-
-        foreach ($hooks as $registered_hook) {
-            if ($registered_hook['hook'] === $hook) {
-                // If component and callback are specified, check them too
-                if ($component !== null && $registered_hook['component'] !== $component) {
-                    continue;
-                }
-                if ($callback !== null && $registered_hook['callback'] !== $callback) {
-                    continue;
-                }
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Get hook count by type
-     *
-     * @since 1.0.0
-     * @param string $type Hook type ('action', 'filter', or 'shortcode')
-     * @return int Number of registered hooks
-     */
-    public function get_hook_count($type)
-    {
-        switch ($type) {
-            case 'action':
-                return count($this->actions);
-            case 'filter':
-                return count($this->filters);
-            case 'shortcode':
-                return count($this->shortcodes);
-            default:
-                return 0;
-        }
-    }
-
-    /**
-     * Get all hooks summary
-     *
-     * @since 1.0.0
-     * @return array Summary of all registered hooks
-     */
-    public function get_hooks_summary()
-    {
-        return array(
-            'actions' => count($this->actions),
-            'filters' => count($this->filters),
-            'shortcodes' => count($this->shortcodes),
-            'total' => count($this->actions) + count($this->filters) + count($this->shortcodes)
-        );
-    }
-
-    /**
-     * Clear all hooks
-     *
-     * @since 1.0.0
-     */
-    public function clear_all_hooks()
-    {
-        $this->actions = array();
-        $this->filters = array();
-        $this->shortcodes = array();
-    }
-
-    /**
-     * Export hooks for debugging
-     *
-     * @since 1.0.0
-     * @return array All registered hooks
-     */
-    public function export_hooks()
-    {
-        return array(
-            'actions' => $this->actions,
-            'filters' => $this->filters,
-            'shortcodes' => $this->shortcodes
-        );
     }
 }
