@@ -1,14 +1,12 @@
 <?php
 
 /**
- * ChatShop Logger
+ * Logger Class
  *
- * Comprehensive logging system with multiple levels, file rotation,
- * and database logging for debugging and monitoring.
+ * Handles logging functionality for the ChatShop plugin.
  *
- * @package    ChatShop
- * @subpackage ChatShop/includes
- * @since      1.0.0
+ * @package ChatShop
+ * @since 1.0.0
  */
 
 namespace ChatShop;
@@ -26,10 +24,10 @@ if (!defined('ABSPATH')) {
 class ChatShop_Logger
 {
     /**
-     * Log levels
+     * Log levels mapping
      *
-     * @since 1.0.0
      * @var array
+     * @since 1.0.0
      */
     private static $log_levels = array(
         'emergency' => 0,
@@ -45,48 +43,48 @@ class ChatShop_Logger
     /**
      * Current log level
      *
-     * @since 1.0.0
      * @var int
+     * @since 1.0.0
      */
-    private static $current_level = 6; // info
+    private static $current_level = 6; // INFO level by default
 
     /**
      * Log directory
      *
-     * @since 1.0.0
      * @var string
-     */
-    private static $log_dir = '';
-
-    /**
-     * Database logging enabled
-     *
      * @since 1.0.0
-     * @var bool
      */
-    private static $db_logging = false;
+    private static $log_dir;
 
     /**
      * File logging enabled
      *
-     * @since 1.0.0
      * @var bool
+     * @since 1.0.0
      */
     private static $file_logging = true;
 
     /**
-     * Maximum log file size in bytes
+     * Database logging enabled
      *
+     * @var bool
      * @since 1.0.0
-     * @var int
      */
-    private static $max_file_size = 10485760; // 10MB
+    private static $db_logging = false;
+
+    /**
+     * Maximum file size in bytes (10MB)
+     *
+     * @var int
+     * @since 1.0.0
+     */
+    private static $max_file_size = 10485760;
 
     /**
      * Maximum number of log files to keep
      *
-     * @since 1.0.0
      * @var int
+     * @since 1.0.0
      */
     private static $max_files = 5;
 
@@ -459,66 +457,24 @@ class ChatShop_Logger
         $table_name = $wpdb->prefix . 'chatshop_logs';
 
         $where_clause = '';
+        $prepare_values = array();
+
         if (!empty($level)) {
-            $where_clause = $wpdb->prepare("WHERE level = %s", $level);
+            $where_clause = 'WHERE level = %s';
+            $prepare_values[] = $level;
         }
 
-        $query = $wpdb->prepare(
-            "SELECT * FROM {$table_name} {$where_clause} ORDER BY created_at DESC LIMIT %d",
-            $limit
-        );
+        $prepare_values[] = intval($limit);
 
-        return $wpdb->get_results($query, ARRAY_A);
-    }
+        $query = "SELECT * FROM {$table_name} {$where_clause} ORDER BY created_at DESC LIMIT %d";
 
-    /**
-     * Get log statistics
-     *
-     * @since 1.0.0
-     * @param string $period Period (today, week, month)
-     * @return array Log statistics
-     */
-    public static function get_log_statistics($period = 'today')
-    {
-        if (!self::$db_logging) {
-            return array();
+        if (!empty($prepare_values)) {
+            $results = $wpdb->get_results($wpdb->prepare($query, $prepare_values));
+        } else {
+            $results = $wpdb->get_results($query);
         }
 
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'chatshop_logs';
-
-        // Determine date range
-        switch ($period) {
-            case 'week':
-                $date_filter = "created_at >= DATE_SUB(NOW(), INTERVAL 1 WEEK)";
-                break;
-            case 'month':
-                $date_filter = "created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)";
-                break;
-            case 'today':
-            default:
-                $date_filter = "DATE(created_at) = CURDATE()";
-                break;
-        }
-
-        $query = "
-            SELECT 
-                level,
-                COUNT(*) as count
-            FROM {$table_name} 
-            WHERE {$date_filter}
-            GROUP BY level
-            ORDER BY count DESC
-        ";
-
-        $results = $wpdb->get_results($query, ARRAY_A);
-        $statistics = array();
-
-        foreach ($results as $result) {
-            $statistics[$result['level']] = intval($result['count']);
-        }
-
-        return $statistics;
+        return $results ? $results : array();
     }
 
     /**
@@ -527,14 +483,14 @@ class ChatShop_Logger
      * @since 1.0.0
      * @param bool $files Clear log files
      * @param bool $database Clear database logs
-     * @return bool Clear result
+     * @return bool Success status
      */
     public static function clear_logs($files = true, $database = true)
     {
         $success = true;
 
         // Clear log files
-        if ($files && is_dir(self::$log_dir)) {
+        if ($files && self::$file_logging) {
             $log_files = glob(self::$log_dir . '*.log*');
             foreach ($log_files as $file) {
                 if (!unlink($file)) {
@@ -733,17 +689,4 @@ class ChatShop_Logger
     {
         return self::$log_dir;
     }
-}
-
-/**
- * Global logging function
- *
- * @since 1.0.0
- * @param string $message Log message
- * @param string $level Log level
- * @param array  $context Additional context
- */
-function chatshop_log($message, $level = 'info', $context = array())
-{
-    ChatShop_Logger::log($message, $level, $context);
 }
