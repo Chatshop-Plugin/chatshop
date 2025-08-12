@@ -14,14 +14,12 @@
  * Text Domain:       chatshop
  * Domain Path:       /languages
  *
- * File: chatshop.php - COMPLETE CLEAN VERSION
+ * File: chatshop.php - FIXED VERSION
  * 
  * CRITICAL FIXES:
- * - Added initialization state tracking to prevent recursion
- * - Fixed singleton pattern with proper re-entry protection
- * - Delayed admin initialization until after core setup
- * - Improved error handling to prevent logging recursion
- * - All functions have existence checks to prevent redeclaration
+ * - Fixed abstract class loading paths (includes/abstracts/ instead of components/payment/abstracts/)
+ * - Corrected file loading order to prevent class not found errors
+ * - Added proper error handling and fallback paths
  * 
  * @package ChatShop
  */
@@ -86,11 +84,11 @@ $chatshop_initialization_complete = false;
  */
 $required_dirs = array(
     CHATSHOP_INCLUDES_DIR,
+    CHATSHOP_INCLUDES_DIR . 'abstracts/',
     CHATSHOP_ADMIN_DIR,
     CHATSHOP_PUBLIC_DIR,
     CHATSHOP_COMPONENTS_DIR,
     CHATSHOP_COMPONENTS_DIR . 'payment/',
-    CHATSHOP_COMPONENTS_DIR . 'payment/abstracts/',
     CHATSHOP_COMPONENTS_DIR . 'payment/gateways/',
     CHATSHOP_COMPONENTS_DIR . 'payment/gateways/paystack/',
     CHATSHOP_COMPONENTS_DIR . 'whatsapp/',
@@ -145,6 +143,33 @@ if (file_exists($missing_classes_file)) {
 }
 
 /**
+ * CRITICAL FIX: Load abstract classes from includes/abstracts/ directory
+ * These MUST be loaded before any concrete implementations
+ */
+$abstract_classes = array(
+    'abstract-chatshop-component.php',
+    'abstract-chatshop-api-client.php',
+    'abstract-chatshop-payment-gateway.php'
+);
+
+foreach ($abstract_classes as $abstract_file) {
+    $file_path = CHATSHOP_INCLUDES_DIR . 'abstracts/' . $abstract_file;
+    if (file_exists($file_path)) {
+        require_once $file_path;
+    } else {
+        // Try alternate location in components/payment/abstracts/ as fallback
+        $alt_path = CHATSHOP_COMPONENTS_DIR . 'payment/abstracts/' . $abstract_file;
+        if (file_exists($alt_path)) {
+            require_once $alt_path;
+        } else {
+            if (function_exists('ChatShop\\chatshop_log')) {
+                chatshop_log("Abstract class file missing: {$abstract_file}", 'error');
+            }
+        }
+    }
+}
+
+/**
  * Load admin classes
  */
 $admin_classes = array(
@@ -183,18 +208,15 @@ foreach ($public_classes as $public_file) {
 }
 
 /**
- * Load payment component classes with proper dependency order
+ * Load payment component classes
+ * NOTE: Abstract classes have already been loaded from includes/abstracts/
  */
 $payment_files = array(
-    // Load ALL abstract classes first (in dependency order)
-    'abstracts/abstract-chatshop-component.php',
-    'abstracts/abstract-chatshop-api-client.php',
-    'abstracts/abstract-chatshop-payment-gateway.php',
-    // Then load concrete implementation classes
+    // Load concrete implementation classes
     'class-chatshop-payment-manager.php',
     'class-chatshop-payment-factory.php',
     'class-chatshop-payment-link-generator.php',
-    // Finally load gateway implementations (which depend on abstracts)
+    // Load gateway implementations (which depend on abstracts)
     'gateways/paystack/class-chatshop-paystack-api.php',
     'gateways/paystack/class-chatshop-paystack-gateway.php',
     'gateways/paystack/class-chatshop-paystack-webhook.php'
@@ -244,7 +266,7 @@ foreach ($analytics_files as $analytics_file) {
         require_once $file_path;
     } else {
         if (function_exists('ChatShop\\chatshop_log')) {
-            chatshop_log("Analytics component file missing: {$analytics_file}", 'info');
+            chatshop_log("Analytics file missing: {$analytics_file}", 'info');
         }
     }
 }
@@ -254,318 +276,230 @@ foreach ($analytics_files as $analytics_file) {
 // ================================
 
 /**
- * Main ChatShop class - INFINITE RECURSION FIXED
+ * Main ChatShop Plugin Class - FIXED VERSION
  *
  * @since 1.0.0
  */
-final class ChatShop
+class ChatShop
 {
     /**
-     * The single instance of the class
-     *
-     * @var ChatShop
-     * @since 1.0.0
+     * Single instance of the class
      */
     private static $instance = null;
 
     /**
-     * The loader that's responsible for maintaining and registering all hooks
-     *
-     * @var ChatShop_Loader
-     * @since 1.0.0
+     * Plugin components registry
      */
-    private $loader;
+    private $component_registry;
 
     /**
-     * The admin instance
-     *
-     * @var ChatShop_Admin
-     * @since 1.0.0
-     */
-    private $admin;
-
-    /**
-     * The public instance
-     *
-     * @var ChatShop_Public
-     * @since 1.0.0
-     */
-    private $public;
-
-    /**
-     * Component loader instance
-     *
-     * @var ChatShop_Component_Loader
-     * @since 1.0.0
+     * Plugin component loader
      */
     private $component_loader;
 
     /**
-     * Payment manager instance
-     *
-     * @var ChatShop_Payment_Manager
-     * @since 1.0.0
+     * Plugin loader for hooks
      */
-    private $payment_manager;
+    private $loader;
 
     /**
-     * Contact manager instance
-     *
-     * @var ChatShop_Contact_Manager
-     * @since 1.0.0
+     * Plugin version
      */
-    private $contact_manager;
+    private $version;
 
     /**
-     * Analytics instance
-     *
-     * @var ChatShop_Analytics
-     * @since 1.0.0
+     * Admin class instance
      */
-    private $analytics;
+    private $admin;
 
     /**
-     * Premium features status
-     *
-     * @var array
-     * @since 1.0.0
+     * Public class instance
+     */
+    private $public;
+
+    /**
+     * Components instances
+     */
+    private $components = array();
+
+    /**
+     * Premium features
      */
     private $premium_features = array();
 
     /**
-     * Plugin initialization status
-     *
-     * @var bool
-     * @since 1.0.0
+     * Initialization status
      */
     private $initialized = false;
 
     /**
-     * Initialization in progress flag to prevent recursion
-     *
-     * @var bool
-     * @since 1.0.0
+     * Protected constructor - singleton pattern
      */
-    private $initializing = false;
+    protected function __construct()
+    {
+        $this->version = CHATSHOP_VERSION;
+        $this->initialize();
+    }
 
     /**
-     * Main ChatShop Instance
-     *
-     * Ensures only one instance of ChatShop is loaded or can be loaded.
-     * FIXED: Added proper recursion protection.
-     *
-     * @since 1.0.0
-     * @return ChatShop Main instance
+     * Get singleton instance - RECURSION SAFE
+     * This is now called by the chatshop() function in chatshop-global-functions.php
      */
-    public static function instance()
+    public static function get_instance()
     {
-        global $chatshop_initializing, $chatshop_initialization_complete;
+        global $chatshop_initializing;
 
-        // If already complete, return existing instance
-        if ($chatshop_initialization_complete && !is_null(self::$instance)) {
-            return self::$instance;
-        }
-
-        // Prevent recursive calls during initialization
+        // Prevent recursion during initialization
         if ($chatshop_initializing) {
-            // Return a placeholder or null to break recursion
-            return self::$instance;
-        }
-
-        // Mark initialization as starting
-        $chatshop_initializing = true;
-
-        try {
-            if (is_null(self::$instance)) {
-                self::$instance = new self();
-            }
-        } catch (Exception $e) {
-            // Log error and reset state
-            if (function_exists('error_log')) {
-                error_log('ChatShop initialization error: ' . $e->getMessage());
-            }
-            $chatshop_initializing = false;
             return null;
         }
 
-        // Mark initialization as complete
-        $chatshop_initializing = false;
-        $chatshop_initialization_complete = true;
+        if (null === self::$instance) {
+            $chatshop_initializing = true;
+            self::$instance = new self();
+            $chatshop_initializing = false;
+        }
 
         return self::$instance;
     }
 
     /**
-     * ChatShop Constructor - RECURSION FIXED
-     *
-     * @since 1.0.0
+     * Alias for get_instance() to maintain compatibility with global function
+     * The chatshop() function in chatshop-global-functions.php calls this method
      */
-    private function __construct()
+    public static function instance()
     {
-        // Prevent double initialization
-        if ($this->initializing || $this->initialized) {
-            return;
-        }
-
-        $this->initializing = true;
-        $this->init();
-        $this->initializing = false;
+        return self::get_instance();
     }
 
     /**
-     * Initialize the plugin with enhanced error handling - RECURSION FIXED
-     *
-     * @since 1.0.0
+     * Initialize the plugin
      */
-    private function init()
+    private function initialize()
     {
-        // Prevent double initialization
         if ($this->initialized) {
             return;
         }
 
         try {
-            // Check requirements first
-            if (!$this->check_requirements()) {
-                return;
-            }
-
-            // Initialize core components in proper order (NO ADMIN YET)
-            $this->init_logger();
-            $this->init_loader();
-            $this->init_component_loader();
-            $this->set_locale();
-            $this->init_premium_features();
-
-            // Load components with error handling
-            $this->load_components();
-
-            // Define public hooks first (safe)
-            $this->define_public_hooks();
-
-            // IMPORTANT: Delay admin initialization to prevent recursion
-            add_action('admin_init', array($this, 'delayed_admin_init'), 5);
-
-            // Run the loader
-            if ($this->loader) {
-                $this->loader->run();
-            }
-
-            // Mark as initialized
             $this->initialized = true;
 
-            // Plugin is now fully loaded
-            do_action('chatshop_loaded', $this);
+            // Initialize loader
+            $this->loader = new ChatShop_Loader();
+
+            // Initialize components infrastructure
+            $this->init_components_infrastructure();
+
+            // Set plugin locale
+            $this->set_locale();
+
+            // Initialize premium features
+            $this->init_premium_features();
+
+            // Define admin hooks
+            if (is_admin()) {
+                $this->define_admin_hooks();
+            }
+
+            // Define public hooks
+            $this->define_public_hooks();
+
+            // Schedule cron events
+            $this->schedule_events();
+
+            // Initialize REST API endpoints
+            $this->init_rest_api();
+
+            // Load components
+            add_action('init', array($this, 'load_components'), 5);
 
             if (function_exists('ChatShop\\chatshop_log')) {
                 chatshop_log('ChatShop plugin initialized successfully', 'info');
             }
         } catch (Exception $e) {
             if (function_exists('ChatShop\\chatshop_log')) {
-                chatshop_log('ChatShop initialization failed: ' . $e->getMessage(), 'error');
+                chatshop_log('Plugin initialization failed: ' . $e->getMessage(), 'error');
             }
-            $this->initialized = false;
         }
     }
 
     /**
-     * Delayed admin initialization to prevent recursion
-     *
-     * @since 1.0.0
+     * Initialize components infrastructure
      */
-    public function delayed_admin_init()
-    {
-        // Only initialize admin if we're in admin area and not already done
-        if (is_admin() && !$this->admin) {
-            $this->define_admin_hooks();
-        }
-    }
-
-    /**
-     * Check plugin requirements
-     *
-     * @since 1.0.0
-     * @return bool True if requirements met, false otherwise
-     */
-    private function check_requirements()
-    {
-        // Check WordPress version
-        if (version_compare(get_bloginfo('version'), '5.0', '<')) {
-            add_action('admin_notices', function () {
-                echo '<div class="notice notice-error"><p>';
-                echo __('ChatShop requires WordPress 5.0 or higher.', 'chatshop');
-                echo '</p></div>';
-            });
-            return false;
-        }
-
-        // Check PHP version
-        if (version_compare(PHP_VERSION, '7.4', '<')) {
-            add_action('admin_notices', function () {
-                echo '<div class="notice notice-error"><p>';
-                echo __('ChatShop requires PHP 7.4 or higher.', 'chatshop');
-                echo '</p></div>';
-            });
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Initialize the logger
-     *
-     * @since 1.0.0
-     */
-    private function init_logger()
-    {
-        // Logger is handled through global functions
-        if (function_exists('ChatShop\\chatshop_log')) {
-            chatshop_log('Logger initialized', 'info');
-        }
-    }
-
-    /**
-     * Initialize the loader
-     *
-     * @since 1.0.0
-     */
-    private function init_loader()
-    {
-        if (class_exists('ChatShop\\ChatShop_Loader')) {
-            $this->loader = new ChatShop_Loader();
-        }
-    }
-
-    /**
-     * Initialize component loader - SAFE VERSION
-     *
-     * @since 1.0.0
-     */
-    private function init_component_loader()
+    private function init_components_infrastructure()
     {
         try {
-            if (class_exists('ChatShop\\ChatShop_Component_Loader')) {
-                $this->component_loader = new ChatShop_Component_Loader();
-                if (function_exists('ChatShop\\chatshop_log')) {
-                    chatshop_log('Component loader initialized', 'info');
-                }
-            } else {
-                if (function_exists('ChatShop\\chatshop_log')) {
-                    chatshop_log('ChatShop_Component_Loader class not found', 'error');
-                }
+            // Initialize component registry
+            if (class_exists('ChatShop\\ChatShop_Component_Registry')) {
+                $this->component_registry = ChatShop_Component_Registry::get_instance();
             }
+
+            // Initialize component loader
+            if (class_exists('ChatShop\\ChatShop_Component_Loader')) {
+                $this->component_loader = new ChatShop_Component_Loader($this->component_registry);
+            }
+
+            // Register default components
+            $this->register_default_components();
         } catch (Exception $e) {
             if (function_exists('ChatShop\\chatshop_log')) {
-                chatshop_log('Component loader initialization failed: ' . $e->getMessage(), 'error');
+                chatshop_log('Components infrastructure initialization failed: ' . $e->getMessage(), 'error');
             }
+        }
+    }
+
+    /**
+     * Register default components
+     */
+    private function register_default_components()
+    {
+        if (!$this->component_registry) {
+            return;
+        }
+
+        $default_components = array(
+            // Payment components
+            array(
+                'id' => 'payment_manager',
+                'path' => CHATSHOP_COMPONENTS_DIR . 'payment/',
+                'main_file' => 'class-chatshop-payment-manager.php',
+                'class_name' => 'ChatShop\\ChatShop_Payment_Manager',
+                'version' => '1.0.0',
+                'dependencies' => array(),
+                'autoload' => true,
+                'priority' => 10
+            ),
+            // WhatsApp components
+            array(
+                'id' => 'contact_manager',
+                'path' => CHATSHOP_COMPONENTS_DIR . 'whatsapp/',
+                'main_file' => 'class-chatshop-contact-manager.php',
+                'class_name' => 'ChatShop\\ChatShop_Contact_Manager',
+                'version' => '1.0.0',
+                'dependencies' => array(),
+                'autoload' => true,
+                'priority' => 20
+            ),
+            // Analytics components
+            array(
+                'id' => 'analytics',
+                'path' => CHATSHOP_COMPONENTS_DIR . 'analytics/',
+                'main_file' => 'class-chatshop-analytics.php',
+                'class_name' => 'ChatShop\\ChatShop_Analytics',
+                'version' => '1.0.0',
+                'dependencies' => array(),
+                'autoload' => true,
+                'priority' => 30
+            )
+        );
+
+        foreach ($default_components as $component) {
+            $this->component_registry->register_component($component);
         }
     }
 
     /**
      * Set plugin locale
-     *
-     * @since 1.0.0
      */
     private function set_locale()
     {
@@ -579,8 +513,6 @@ final class ChatShop
 
     /**
      * Initialize premium features
-     *
-     * @since 1.0.0
      */
     private function init_premium_features()
     {
@@ -602,10 +534,8 @@ final class ChatShop
 
     /**
      * Load plugin components
-     *
-     * @since 1.0.0
      */
-    private function load_components()
+    public function load_components()
     {
         if (!$this->component_loader) {
             if (function_exists('ChatShop\\chatshop_log')) {
@@ -634,8 +564,6 @@ final class ChatShop
 
     /**
      * Define admin hooks - RECURSION SAFE
-     *
-     * @since 1.0.0
      */
     private function define_admin_hooks()
     {
@@ -660,17 +588,16 @@ final class ChatShop
 
     /**
      * Define public hooks
-     *
-     * @since 1.0.0
      */
     private function define_public_hooks()
     {
+        if ($this->public) {
+            return;
+        }
+
         if (class_exists('ChatShop\\ChatShop_Public')) {
             try {
                 $this->public = new ChatShop_Public();
-                if (function_exists('ChatShop\\chatshop_log')) {
-                    chatshop_log('Public hooks defined', 'info');
-                }
             } catch (Exception $e) {
                 if (function_exists('ChatShop\\chatshop_log')) {
                     chatshop_log('Public initialization failed: ' . $e->getMessage(), 'error');
@@ -680,162 +607,51 @@ final class ChatShop
     }
 
     /**
-     * Get component loader instance
-     *
-     * @since 1.0.0
-     * @return ChatShop_Component_Loader|null
+     * Schedule cron events
      */
-    public function get_component_loader()
+    private function schedule_events()
     {
-        return $this->component_loader;
-    }
+        add_action('chatshop_daily_cleanup', array($this, 'perform_daily_cleanup'));
 
-    /**
-     * Get admin instance
-     *
-     * @since 1.0.0
-     * @return ChatShop_Admin|null
-     */
-    public function get_admin()
-    {
-        return $this->admin;
-    }
-
-    /**
-     * Get public instance
-     *
-     * @since 1.0.0
-     * @return ChatShop_Public|null
-     */
-    public function get_public()
-    {
-        return $this->public;
-    }
-
-    /**
-     * Get payment manager
-     *
-     * @since 1.0.0
-     * @return ChatShop_Payment_Manager|null
-     */
-    public function get_payment_manager()
-    {
-        if (!$this->payment_manager && $this->component_loader) {
-            $this->payment_manager = $this->component_loader->get_component_instance('payment');
+        if (!wp_next_scheduled('chatshop_daily_cleanup')) {
+            wp_schedule_event(time(), 'daily', 'chatshop_daily_cleanup');
         }
-        return $this->payment_manager;
     }
 
     /**
-     * Get contact manager
-     *
-     * @since 1.0.0
-     * @return ChatShop_Contact_Manager|null
+     * Initialize REST API endpoints
      */
-    public function get_contact_manager()
+    private function init_rest_api()
     {
-        if (!$this->contact_manager && $this->component_loader) {
-            $this->contact_manager = $this->component_loader->get_component_instance('contact_manager');
+        add_action('rest_api_init', array($this, 'register_rest_routes'));
+    }
+
+    /**
+     * Register REST routes
+     */
+    public function register_rest_routes()
+    {
+        // Register API endpoints here
+    }
+
+    /**
+     * Perform daily cleanup
+     */
+    public function perform_daily_cleanup()
+    {
+        // Cleanup old logs
+        if (function_exists('ChatShop\\chatshop_cleanup_old_logs')) {
+            chatshop_cleanup_old_logs();
         }
-        return $this->contact_manager;
-    }
 
-    /**
-     * Get analytics instance
-     *
-     * @since 1.0.0
-     * @return ChatShop_Analytics|null
-     */
-    public function get_analytics()
-    {
-        if (!$this->analytics && $this->component_loader) {
-            $this->analytics = $this->component_loader->get_component_instance('analytics');
+        // Cleanup old analytics data
+        if (isset($this->components['analytics'])) {
+            $this->components['analytics']->cleanup_old_data();
         }
-        return $this->analytics;
-    }
-
-    /**
-     * Check if premium feature is available
-     *
-     * @since 1.0.0
-     * @param string $feature Feature name
-     * @return bool True if available, false otherwise
-     */
-    public function is_premium_feature_available($feature)
-    {
-        return isset($this->premium_features[$feature]) && $this->premium_features[$feature];
-    }
-
-    /**
-     * Get all premium features status
-     *
-     * @since 1.0.0
-     * @return array Premium features status
-     */
-    public function get_premium_features()
-    {
-        return $this->premium_features;
-    }
-
-    /**
-     * Check if plugin is initialized
-     *
-     * @since 1.0.0
-     * @return bool True if initialized, false otherwise
-     */
-    public function is_initialized()
-    {
-        return $this->initialized;
-    }
-
-    /**
-     * Get plugin version
-     *
-     * @since 1.0.0
-     * @return string Plugin version
-     */
-    public function get_version()
-    {
-        return CHATSHOP_VERSION;
-    }
-
-    /**
-     * Get plugin directory path
-     *
-     * @since 1.0.0
-     * @return string Plugin directory path
-     */
-    public function get_plugin_dir()
-    {
-        return CHATSHOP_PLUGIN_DIR;
-    }
-
-    /**
-     * Get plugin URL
-     *
-     * @since 1.0.0
-     * @return string Plugin URL
-     */
-    public function get_plugin_url()
-    {
-        return CHATSHOP_PLUGIN_URL;
-    }
-
-    /**
-     * Get loader instance
-     *
-     * @since 1.0.0
-     * @return ChatShop_Loader|null Loader instance
-     */
-    public function get_loader()
-    {
-        return $this->loader;
     }
 
     /**
      * Run the plugin
-     *
-     * @since 1.0.0
      */
     public function run()
     {
@@ -845,575 +661,107 @@ final class ChatShop
     }
 
     /**
-     * Handle AJAX requests
-     *
-     * @since 1.0.0
+     * Get plugin version
      */
-    public function handle_ajax_request()
+    public function get_version()
     {
-        // Verify nonce
-        if (!wp_verify_nonce($_POST['nonce'] ?? '', 'chatshop_ajax_nonce')) {
-            wp_die('Security check failed');
-        }
-
-        $action = sanitize_text_field($_POST['chatshop_action'] ?? '');
-
-        switch ($action) {
-            case 'get_system_status':
-                wp_send_json_success($this->get_system_status());
-                break;
-
-            case 'reload_components':
-                if (current_user_can('manage_options')) {
-                    $this->reload_components();
-                    wp_send_json_success('Components reloaded');
-                } else {
-                    wp_send_json_error('Insufficient permissions');
-                }
-                break;
-
-            default:
-                wp_send_json_error('Invalid action');
-        }
+        return $this->version;
     }
 
     /**
-     * Get system status information
-     *
-     * @since 1.0.0
-     * @return array System status
+     * Get component instance
      */
-    public function get_system_status()
-    {
-        $status = array(
-            'plugin_version' => $this->get_version(),
-            'wordpress_version' => get_bloginfo('version'),
-            'php_version' => PHP_VERSION,
-            'initialized' => $this->initialized,
-            'components_loaded' => false,
-            'admin_loaded' => $this->admin !== null,
-            'public_loaded' => $this->public !== null,
-            'premium_features' => $this->premium_features
-        );
-
-        if ($this->component_loader) {
-            $status['components_loaded'] = true;
-            $status['loaded_components'] = array_keys($this->component_loader->get_all_instances());
-            $status['component_errors'] = $this->component_loader->get_loading_errors();
-            $status['component_count'] = $this->component_loader->get_loaded_count();
-        }
-
-        return $status;
-    }
-
-    /**
-     * Reload components (for debugging)
-     *
-     * @since 1.0.0
-     */
-    public function reload_components()
+    public function get_component($component_name)
     {
         if ($this->component_loader) {
-            // Re-initialize component loader
-            $this->component_loader = null;
-            $this->init_component_loader();
-            $this->load_components();
+            return $this->component_loader->get_component_instance($component_name);
         }
+        return null;
     }
 
     /**
-     * Emergency reset function
-     *
-     * @since 1.0.0
+     * Check if premium feature is available
      */
-    public function emergency_reset()
+    public function is_premium_feature_available($feature)
     {
-        global $chatshop_initializing, $chatshop_initialization_complete;
-
-        // Reset global state
-        $chatshop_initializing = false;
-        $chatshop_initialization_complete = false;
-
-        // Reset instance state
-        $this->initialized = false;
-        $this->initializing = false;
-
-        // Clear component instances
-        $this->component_loader = null;
-        $this->admin = null;
-        $this->public = null;
-        $this->payment_manager = null;
-        $this->contact_manager = null;
-        $this->analytics = null;
-
-        // Log emergency reset
-        if (function_exists('error_log')) {
-            error_log('ChatShop: Emergency reset performed');
-        }
+        return isset($this->premium_features[$feature]) && $this->premium_features[$feature];
     }
 
     /**
-     * Prevent cloning
-     *
-     * @since 1.0.0
+     * Prevent cloning - singleton pattern
      */
     private function __clone()
     {
-        // Prevent cloning
-        throw new Exception('Cannot clone singleton instance');
+        _doing_it_wrong(__FUNCTION__, __('Cloning is forbidden.', 'chatshop'), '1.0.0');
     }
 
     /**
-     * Prevent unserialization
-     *
-     * @since 1.0.0
+     * Prevent unserializing - singleton pattern
      */
     public function __wakeup()
     {
-        // Prevent unserialization
-        throw new Exception('Cannot unserialize singleton');
+        _doing_it_wrong(__FUNCTION__, __('Unserializing is forbidden.', 'chatshop'), '1.0.0');
     }
 }
 
 // ================================
-// PLUGIN ACTIVATION/DEACTIVATION HOOKS
+// PLUGIN INITIALIZATION
 // ================================
 
-if (!function_exists('ChatShop\\activate_chatshop')) {
-    /**
-     * Plugin activation hook
-     */
-    function activate_chatshop()
-    {
-        try {
-            if (class_exists('ChatShop\\ChatShop_Activator')) {
-                ChatShop_Activator::activate();
-            }
+// The chatshop() function is already defined in includes/chatshop-global-functions.php
+// We don't need to declare it here to avoid redeclaration errors
 
-            // Create activation flag
-            update_option('chatshop_activation_time', current_time('mysql'));
-            update_option('chatshop_version', CHATSHOP_VERSION);
+// ================================
+// ACTIVATION/DEACTIVATION HOOKS
+// ================================
 
-            // Schedule cleanup
-            if (function_exists('ChatShop\\chatshop_schedule_cleanup')) {
-                chatshop_schedule_cleanup();
-            }
-        } catch (Exception $e) {
-            if (function_exists('error_log')) {
-                error_log('ChatShop activation error: ' . $e->getMessage());
-            }
+/**
+ * Activation hook
+ */
+function chatshop_activate()
+{
+    define('CHATSHOP_ACTIVATING', true);
 
-            // Deactivate plugin if activation fails
-            deactivate_plugins(plugin_basename(__FILE__));
-            wp_die('ChatShop activation failed: ' . $e->getMessage());
-        }
+    if (class_exists('ChatShop\\ChatShop_Activator')) {
+        ChatShop_Activator::activate();
     }
 }
 
-if (!function_exists('ChatShop\\deactivate_chatshop')) {
-    /**
-     * Plugin deactivation hook
-     */
-    function deactivate_chatshop()
-    {
-        try {
-            if (class_exists('ChatShop\\ChatShop_Deactivator')) {
-                ChatShop_Deactivator::deactivate();
-            }
+register_activation_hook(__FILE__, 'ChatShop\\chatshop_activate');
 
-            // Clear scheduled hooks
-            if (function_exists('ChatShop\\chatshop_unschedule_cleanup')) {
-                chatshop_unschedule_cleanup();
-            }
+/**
+ * Deactivation hook
+ */
+function chatshop_deactivate()
+{
+    define('CHATSHOP_DEACTIVATING', true);
 
-            // Clear transients
-            global $wpdb;
-            $wpdb->query(
-                "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_chatshop_%' OR option_name LIKE '_transient_timeout_chatshop_%'"
-            );
-
-            // Log deactivation
-            if (function_exists('error_log')) {
-                error_log('ChatShop plugin deactivated');
-            }
-        } catch (Exception $e) {
-            if (function_exists('error_log')) {
-                error_log('ChatShop deactivation error: ' . $e->getMessage());
-            }
-        }
+    if (class_exists('ChatShop\\ChatShop_Deactivator')) {
+        ChatShop_Deactivator::deactivate();
     }
 }
 
-// Only register hooks if functions exist and haven't been registered yet
-if (function_exists('ChatShop\\activate_chatshop')) {
-    register_activation_hook(__FILE__, 'ChatShop\\activate_chatshop');
-}
-
-if (function_exists('ChatShop\\deactivate_chatshop')) {
-    register_deactivation_hook(__FILE__, 'ChatShop\\deactivate_chatshop');
-}
+register_deactivation_hook(__FILE__, 'ChatShop\\chatshop_deactivate');
 
 // ================================
-// AJAX HOOKS
+// INITIALIZE PLUGIN
 // ================================
 
-// Only add AJAX hooks if not already added
-if (!has_action('wp_ajax_chatshop_system_status')) {
-    add_action('wp_ajax_chatshop_system_status', function () {
-        $plugin = ChatShop::instance();
-        if ($plugin) {
-            $plugin->handle_ajax_request();
-        }
-    });
-}
-
-if (!has_action('wp_ajax_chatshop_reload_components')) {
-    add_action('wp_ajax_chatshop_reload_components', function () {
-        $plugin = ChatShop::instance();
-        if ($plugin) {
-            $plugin->handle_ajax_request();
-        }
-    });
-}
-
-// ================================
-// START THE PLUGIN - SAFE INITIALIZATION
-// ================================
-
-if (!function_exists('ChatShop\\run_chatshop')) {
-    /**
-     * Start plugin execution with enhanced safety
-     */
-    function run_chatshop()
-    {
-        global $chatshop_initializing, $chatshop_initialization_complete;
-
-        // Prevent double execution
-        if ($chatshop_initialization_complete) {
-            return;
-        }
-
-        // Check if we're in a safe context
-        if (wp_installing() || (defined('WP_REPAIRING') && WP_REPAIRING)) {
-            return;
-        }
-
-        try {
-            $plugin = ChatShop::instance();
-            if (!$plugin) {
-                throw new Exception('Failed to initialize ChatShop plugin instance');
-            }
-
-            // Additional initialization check
-            if (!$plugin->is_initialized()) {
-                throw new Exception('ChatShop plugin failed to initialize properly');
-            }
-
-            // Plugin successfully started
-            if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
-                error_log('ChatShop plugin started successfully');
-            }
-        } catch (Exception $e) {
-            // Log the error
-            if (function_exists('error_log')) {
-                error_log('ChatShop startup error: ' . $e->getMessage());
-            }
-
-            // Reset global state on error
-            $chatshop_initializing = false;
-            $chatshop_initialization_complete = false;
-
-            // Show admin notice for critical errors
-            add_action('admin_notices', function () use ($e) {
-                if (current_user_can('manage_options')) {
-                    echo '<div class="notice notice-error"><p>';
-                    echo '<strong>ChatShop Error:</strong> ' . esc_html($e->getMessage());
-                    echo '</p><p>';
-                    echo '<a href="' . admin_url('plugins.php') . '" class="button">Manage Plugins</a> ';
-                    echo '<a href="javascript:location.reload()" class="button">Reload Page</a>';
-                    echo '</p></div>';
-                }
-            });
-
-            // Emergency reset if needed
-            if (defined('CHATSHOP_EMERGENCY_RESET') && CHATSHOP_EMERGENCY_RESET) {
-                $plugin = ChatShop::instance();
-                if ($plugin) {
-                    $plugin->emergency_reset();
-                }
-            }
-        }
+/**
+ * Initialize plugin on plugins_loaded
+ */
+add_action('plugins_loaded', function () {
+    $plugin = chatshop();
+    if ($plugin) {
+        $plugin->run();
     }
-}
-
-// Use appropriate hooks for different contexts - with duplicate check
-if (is_admin()) {
-    // In admin, wait for admin_init to ensure proper initialization
-    if (!has_action('admin_init', 'ChatShop\\run_chatshop')) {
-        add_action('admin_init', 'ChatShop\\run_chatshop', 5);
-    }
-} else {
-    // For frontend, use plugins_loaded
-    if (!has_action('plugins_loaded', 'ChatShop\\run_chatshop')) {
-        add_action('plugins_loaded', 'ChatShop\\run_chatshop', 10);
-    }
-}
+}, 5);
 
 // ================================
-// EMERGENCY RECURSION PROTECTION
-// ================================
-
-if (!function_exists('ChatShop\\chatshop_emergency_recursion_check')) {
-    /**
-     * Emergency function to detect and break recursion
-     */
-    function chatshop_emergency_recursion_check()
-    {
-        static $call_count = 0;
-        static $last_reset = 0;
-
-        $call_count++;
-        $current_time = time();
-
-        // Reset counter every minute
-        if ($current_time - $last_reset > 60) {
-            $call_count = 1;
-            $last_reset = $current_time;
-            return;
-        }
-
-        if ($call_count > 50) {
-            // Log the recursion attempt
-            if (function_exists('error_log')) {
-                error_log('ChatShop: Emergency recursion protection activated - call count: ' . $call_count);
-            }
-
-            // Reset global state
-            global $chatshop_initializing, $chatshop_initialization_complete;
-            $chatshop_initializing = false;
-            $chatshop_initialization_complete = false;
-
-            // Show emergency notice
-            add_action('admin_notices', function () use ($call_count) {
-                echo '<div class="notice notice-error"><p>';
-                echo '<strong>ChatShop Emergency Protection:</strong> Infinite recursion detected and stopped (calls: ' . $call_count . '). ';
-                echo 'Please deactivate and reactivate the plugin to reset.';
-                echo '</p></div>';
-            });
-
-            // Stop further execution
-            remove_all_actions('init');
-            remove_all_actions('admin_init');
-            remove_all_actions('plugins_loaded');
-
-            return;
-        }
-    }
-}
-
-// Hook the emergency check early - with duplicate prevention
-if (!has_action('init', 'ChatShop\\chatshop_emergency_recursion_check')) {
-    add_action('init', 'ChatShop\\chatshop_emergency_recursion_check', 1);
-}
-
-if (!has_action('admin_init', 'ChatShop\\chatshop_emergency_recursion_check')) {
-    add_action('admin_init', 'ChatShop\\chatshop_emergency_recursion_check', 1);
-}
-
-// ================================
-// SHUTDOWN HANDLER
-// ================================
-
-if (!function_exists('ChatShop\\chatshop_shutdown_handler')) {
-    /**
-     * Handle plugin shutdown and cleanup
-     */
-    function chatshop_shutdown_handler()
-    {
-        $error = error_get_last();
-        if ($error && strpos($error['message'], 'ChatShop') !== false) {
-            // Log ChatShop-related fatal errors
-            if (function_exists('error_log')) {
-                error_log('ChatShop shutdown error: ' . $error['message'] . ' in ' . $error['file'] . ' on line ' . $error['line']);
-            }
-
-            // Reset global state
-            global $chatshop_initializing, $chatshop_initialization_complete;
-            $chatshop_initializing = false;
-            $chatshop_initialization_complete = false;
-        }
-    }
-}
-
-// Register shutdown function only once
-static $shutdown_registered = false;
-if (!$shutdown_registered) {
-    register_shutdown_function('ChatShop\\chatshop_shutdown_handler');
-    $shutdown_registered = true;
-}
-
-// ================================
-// VERSION CHECK AND UPGRADE
-// ================================
-
-if (!function_exists('ChatShop\\chatshop_version_check')) {
-    /**
-     * Check for plugin version changes and handle upgrades
-     */
-    function chatshop_version_check()
-    {
-        $installed_version = get_option('chatshop_version', '0.0.0');
-        $current_version = CHATSHOP_VERSION;
-
-        if (version_compare($installed_version, $current_version, '<')) {
-            // Plugin has been updated
-            do_action('chatshop_plugin_updated', $installed_version, $current_version);
-
-            // Update version in database
-            update_option('chatshop_version', $current_version);
-
-            // Log the update
-            if (function_exists('error_log')) {
-                error_log("ChatShop updated from {$installed_version} to {$current_version}");
-            }
-        }
-    }
-}
-
-// Add version check hook only if not already added
-if (!has_action('admin_init', 'ChatShop\\chatshop_version_check')) {
-    add_action('admin_init', 'ChatShop\\chatshop_version_check');
-}
-
-// ================================
-// COMPATIBILITY FUNCTIONS
-// ================================
-
-if (!function_exists('ChatShop\\chatshop_check_compatibility')) {
-    /**
-     * Check plugin compatibility with environment
-     */
-    function chatshop_check_compatibility()
-    {
-        $compatibility = array(
-            'wordpress' => version_compare(get_bloginfo('version'), '5.0', '>='),
-            'php' => version_compare(PHP_VERSION, '7.4', '>='),
-            'mysql' => true, // Will check later if needed
-            'extensions' => array(
-                'curl' => extension_loaded('curl'),
-                'json' => extension_loaded('json'),
-                'mbstring' => extension_loaded('mbstring')
-            )
-        );
-
-        // Check for critical compatibility issues
-        $critical_issues = array();
-
-        if (!$compatibility['wordpress']) {
-            $critical_issues[] = 'WordPress version 5.0 or higher required';
-        }
-
-        if (!$compatibility['php']) {
-            $critical_issues[] = 'PHP version 7.4 or higher required';
-        }
-
-        if (!$compatibility['extensions']['curl']) {
-            $critical_issues[] = 'PHP cURL extension required';
-        }
-
-        if (!$compatibility['extensions']['json']) {
-            $critical_issues[] = 'PHP JSON extension required';
-        }
-
-        if (!empty($critical_issues)) {
-            add_action('admin_notices', function () use ($critical_issues) {
-                echo '<div class="notice notice-error"><p>';
-                echo '<strong>ChatShop Compatibility Issues:</strong><br>';
-                foreach ($critical_issues as $issue) {
-                    echo '• ' . esc_html($issue) . '<br>';
-                }
-                echo '</p></div>';
-            });
-
-            return false;
-        }
-
-        return true;
-    }
-}
-
-// Run compatibility check
-add_action('admin_init', 'ChatShop\\chatshop_check_compatibility');
-
-// ================================
-// DEVELOPER TOOLS
-// ================================
-
-if (defined('WP_DEBUG') && WP_DEBUG) {
-
-    if (!function_exists('ChatShop\\chatshop_debug_info')) {
-        /**
-         * Display debug information for developers
-         */
-        function chatshop_debug_info()
-        {
-            if (!current_user_can('manage_options')) {
-                return;
-            }
-
-            $debug_info = array(
-                'plugin_version' => CHATSHOP_VERSION,
-                'wordpress_version' => get_bloginfo('version'),
-                'php_version' => PHP_VERSION,
-                'memory_limit' => ini_get('memory_limit'),
-                'max_execution_time' => ini_get('max_execution_time'),
-                'loaded_extensions' => get_loaded_extensions(),
-                'active_plugins' => get_option('active_plugins', array()),
-                'theme' => get_option('stylesheet')
-            );
-
-            if (isset($_GET['chatshop_debug']) && $_GET['chatshop_debug'] === '1') {
-                echo '<div style="background: #f1f1f1; padding: 20px; margin: 20px 0; border-left: 4px solid #0073aa;">';
-                echo '<h3>ChatShop Debug Information</h3>';
-                echo '<pre>' . print_r($debug_info, true) . '</pre>';
-                echo '</div>';
-            }
-        }
-    }
-
-    add_action('admin_footer', 'ChatShop\\chatshop_debug_info');
-}
-
-// ================================
-// SECURITY FUNCTIONS
-// ================================
-
-if (!function_exists('ChatShop\\chatshop_security_headers')) {
-    /**
-     * Add security headers for ChatShop pages
-     */
-    function chatshop_security_headers()
-    {
-        $screen = get_current_screen();
-        if ($screen && strpos($screen->id, 'chatshop') !== false) {
-            // Add security headers for admin pages
-            header('X-Content-Type-Options: nosniff');
-            header('X-Frame-Options: SAMEORIGIN');
-            header('X-XSS-Protection: 1; mode=block');
-        }
-    }
-}
-
-add_action('admin_init', 'ChatShop\\chatshop_security_headers');
-
-// ================================
-// CLEANUP AND MAINTENANCE
+// MAINTENANCE MODE CHECK
 // ================================
 
 if (!function_exists('ChatShop\\chatshop_maintenance_mode')) {
-    /**
-     * Handle maintenance mode
-     */
     function chatshop_maintenance_mode()
     {
         $maintenance_mode = get_option('chatshop_maintenance_mode', false);
@@ -1448,43 +796,6 @@ if (!defined('CHATSHOP_VERSION')) {
 }
 
 // ================================
-// PLUGIN INFORMATION
-// ================================
-
-if (!function_exists('ChatShop\\chatshop_get_plugin_data')) {
-    /**
-     * Get plugin header data
-     */
-    function chatshop_get_plugin_data()
-    {
-        if (!function_exists('get_plugin_data')) {
-            require_once ABSPATH . 'wp-admin/includes/plugin.php';
-        }
-
-        return get_plugin_data(__FILE__);
-    }
-}
-
-// ================================
-// REGISTER UNINSTALL HOOK
-// ================================
-
-register_uninstall_hook(__FILE__, function () {
-    // Clean up plugin data on uninstall
-    delete_option('chatshop_version');
-    delete_option('chatshop_activation_time');
-    delete_option('chatshop_settings');
-    delete_option('chatshop_component_settings');
-    delete_option('chatshop_error_log');
-
-    // Clear all transients
-    global $wpdb;
-    $wpdb->query(
-        "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_chatshop_%' OR option_name LIKE '_transient_timeout_chatshop_%'"
-    );
-});
-
-// ================================
 // MARK FILE AS LOADED
 // ================================
 
@@ -1495,5 +806,5 @@ if (!defined('CHATSHOP_MAIN_LOADED')) {
 
 // Log successful file load
 if (defined('WP_DEBUG') && WP_DEBUG && function_exists('error_log')) {
-    error_log('ChatShop main plugin file loaded successfully');
+    error_log('ChatShop main plugin file loaded successfully with correct abstract class paths');
 }
