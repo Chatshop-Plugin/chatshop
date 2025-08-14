@@ -1,16 +1,14 @@
 <?php
 
 /**
- * Abstract API Client
+ * Abstract API Client - COMPLETE VERSION
  *
- * File: components/payment/abstracts/abstract-chatshop-api-client.php
- * 
  * Base class for all API clients providing common functionality
- * for HTTP requests, authentication, caching, and error handling.
+ * for HTTP requests, authentication, and error handling.
  *
- * @package ChatShop
- * @subpackage Abstracts
- * @since 1.0.0
+ * @package    ChatShop
+ * @subpackage ChatShop/components/payment/abstracts
+ * @since      1.0.0
  */
 
 namespace ChatShop;
@@ -21,10 +19,7 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Abstract ChatShop API Client Class
- *
- * Provides base functionality for all API clients including
- * HTTP requests, authentication, rate limiting, and caching.
+ * Abstract API Client Class - COMPLETE VERSION
  *
  * @since 1.0.0
  */
@@ -33,56 +28,64 @@ abstract class ChatShop_Abstract_API_Client
     /**
      * API base URL
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
     protected $api_base_url = '';
 
     /**
      * API version
      *
-     * @var string
      * @since 1.0.0
+     * @var string
      */
     protected $api_version = 'v1';
 
     /**
+     * Client identifier
+     *
+     * @since 1.0.0
+     * @var string
+     */
+    protected $client_id = '';
+
+    /**
      * Request timeout in seconds
      *
-     * @var int
      * @since 1.0.0
+     * @var int
      */
     protected $timeout = 30;
 
     /**
      * Default headers for requests
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
     protected $default_headers = array();
 
     /**
      * Last response data
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
     protected $last_response = array();
 
     /**
      * Debug mode
      *
-     * @var bool
      * @since 1.0.0
+     * @var bool
      */
     protected $debug = false;
 
     /**
      * Rate limit settings
      *
-     * @var array
      * @since 1.0.0
+     * @var array
      */
     protected $rate_limits = array(
         'requests_per_minute' => 60,
@@ -92,18 +95,10 @@ abstract class ChatShop_Abstract_API_Client
     /**
      * Cache duration in seconds
      *
-     * @var int
      * @since 1.0.0
+     * @var int
      */
     protected $cache_duration = 300; // 5 minutes
-
-    /**
-     * API client identifier
-     *
-     * @var string
-     * @since 1.0.0
-     */
-    protected $client_id = '';
 
     /**
      * Constructor
@@ -114,6 +109,7 @@ abstract class ChatShop_Abstract_API_Client
     public function __construct($config = array())
     {
         $this->debug = defined('WP_DEBUG') && WP_DEBUG;
+        $this->client_id = get_class($this);
         $this->setup_default_headers();
         $this->init($config);
     }
@@ -130,15 +126,11 @@ abstract class ChatShop_Abstract_API_Client
     {
         // Default implementation - override in child classes
         if (isset($config['timeout'])) {
-            $this->timeout = intval($config['timeout']);
+            $this->timeout = absint($config['timeout']);
         }
 
         if (isset($config['debug'])) {
             $this->debug = (bool) $config['debug'];
-        }
-
-        if (isset($config['cache_duration'])) {
-            $this->cache_duration = intval($config['cache_duration']);
         }
     }
 
@@ -152,8 +144,7 @@ abstract class ChatShop_Abstract_API_Client
         $this->default_headers = array(
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
-            'User-Agent' => 'ChatShop/' . CHATSHOP_VERSION . ' (WordPress/' . get_bloginfo('version') . ')',
-            'X-Requested-With' => 'XMLHttpRequest'
+            'User-Agent' => 'ChatShop/' . (defined('CHATSHOP_VERSION') ? CHATSHOP_VERSION : '1.0.0') . ' (WordPress/' . get_bloginfo('version') . ')'
         );
     }
 
@@ -161,133 +152,119 @@ abstract class ChatShop_Abstract_API_Client
      * Make HTTP request
      *
      * @since 1.0.0
+     * @param string $method HTTP method
      * @param string $endpoint API endpoint
      * @param array $data Request data
-     * @param string $method HTTP method
      * @param array $headers Additional headers
      * @return array|WP_Error Response data or error
      */
-    public function request($endpoint, $data = array(), $method = 'GET', $headers = array())
+    protected function make_request($method, $endpoint, $data = array(), $headers = array())
     {
         // Check rate limits
         if (!$this->check_rate_limits()) {
-            return new \WP_Error('rate_limit_exceeded', 'API rate limit exceeded');
+            return new \WP_Error('rate_limit', 'Rate limit exceeded');
         }
 
         // Build URL
         $url = $this->build_url($endpoint);
-        if (!$url) {
-            return new \WP_Error('invalid_url', 'Invalid API URL');
-        }
 
         // Prepare headers
-        $request_headers = wp_parse_args($headers, $this->default_headers);
+        $request_headers = array_merge($this->default_headers, $headers);
 
         // Prepare request arguments
         $args = array(
             'method' => strtoupper($method),
-            'headers' => $request_headers,
             'timeout' => $this->timeout,
-            'sslverify' => !$this->is_test_mode(),
-            'user-agent' => $this->default_headers['User-Agent']
+            'headers' => $request_headers,
+            'sslverify' => true
         );
 
-        // Add body for POST/PUT/PATCH requests
-        if (in_array($method, array('POST', 'PUT', 'PATCH')) && !empty($data)) {
-            if (isset($request_headers['Content-Type']) && $request_headers['Content-Type'] === 'application/json') {
+        // Add body for POST/PUT requests
+        if (in_array(strtoupper($method), array('POST', 'PUT', 'PATCH'), true)) {
+            if (!empty($data)) {
                 $args['body'] = wp_json_encode($data);
-            } else {
-                $args['body'] = $data;
             }
+        } elseif (strtoupper($method) === 'GET' && !empty($data)) {
+            // Add query parameters for GET requests
+            $url = add_query_arg($data, $url);
         }
 
-        // Check cache for GET requests
-        if ($method === 'GET' && $this->cache_duration > 0) {
-            $cache_key = $this->get_cache_key($url, $data);
-            $cached_response = $this->get_cached_response($cache_key);
-            if ($cached_response !== false) {
-                return $cached_response;
-            }
-        }
-
-        // Log request
+        // Log request if debug mode
         $this->log_request($url, $method, $data);
 
-        // Make request
+        // Make the request
         $response = wp_remote_request($url, $args);
 
-        // Handle response
+        // Store response for debugging
+        $this->last_response = $response;
+
+        // Check for WP errors
         if (is_wp_error($response)) {
-            $this->log_error('Request failed: ' . $response->get_error_message());
+            $this->log_error('HTTP request failed: ' . $response->get_error_message());
             return $response;
         }
 
-        // Process response
-        $processed_response = $this->process_response($response);
-
-        // Cache successful GET responses
-        if ($method === 'GET' && $this->cache_duration > 0 && !is_wp_error($processed_response)) {
-            $this->cache_response($cache_key, $processed_response);
-        }
-
-        return $processed_response;
-    }
-
-    /**
-     * Build API URL
-     *
-     * @since 1.0.0
-     * @param string $endpoint API endpoint
-     * @return string|false Complete URL or false on error
-     */
-    protected function build_url($endpoint)
-    {
-        if (empty($this->api_base_url)) {
-            return false;
-        }
-
-        $base_url = trailingslashit($this->api_base_url);
-
-        // Add API version if specified
-        if (!empty($this->api_version)) {
-            $base_url .= trailingslashit($this->api_version);
-        }
-
-        return $base_url . ltrim($endpoint, '/');
-    }
-
-    /**
-     * Process HTTP response
-     *
-     * @since 1.0.0
-     * @param array $response HTTP response
-     * @return array|WP_Error Processed response or error
-     */
-    protected function process_response($response)
-    {
+        // Get response details
         $response_code = wp_remote_retrieve_response_code($response);
         $response_body = wp_remote_retrieve_body($response);
 
-        // Store last response
-        $this->last_response = array(
-            'code' => $response_code,
-            'body' => $response_body,
-            'headers' => wp_remote_retrieve_headers($response)
-        );
-
-        // Log response
+        // Log response if debug mode
         $this->log_response($response_code, $response_body);
 
-        // Handle HTTP errors
-        if ($response_code >= 400) {
-            $error_message = $this->extract_error_message($response_body, $response_code);
-            return new \WP_Error('api_error', $error_message, array('response_code' => $response_code));
+        // Update rate limit counters
+        $this->update_rate_limit_counters();
+
+        // Handle response
+        return $this->handle_response($response_code, $response_body);
+    }
+
+    /**
+     * Build full URL from endpoint
+     *
+     * @since 1.0.0
+     * @param string $endpoint API endpoint
+     * @return string Full URL
+     */
+    protected function build_url($endpoint)
+    {
+        $base_url = rtrim($this->api_base_url, '/');
+        $endpoint = ltrim($endpoint, '/');
+
+        if (!empty($this->api_version)) {
+            return $base_url . '/' . $this->api_version . '/' . $endpoint;
         }
 
-        // Decode JSON response
+        return $base_url . '/' . $endpoint;
+    }
+
+    /**
+     * Handle API response
+     *
+     * @since 1.0.0
+     * @param int $response_code HTTP response code
+     * @param string $response_body Response body
+     * @return array|WP_Error Processed response or error
+     */
+    protected function handle_response($response_code, $response_body)
+    {
+        // Handle error status codes
+        if ($response_code >= 400) {
+            $error_message = $this->extract_error_message($response_body, $response_code);
+            $this->log_error("API error {$response_code}: {$error_message}");
+
+            return new \WP_Error(
+                'api_error',
+                $error_message,
+                array('status_code' => $response_code)
+            );
+        }
+
+        // Parse JSON response
         $decoded_body = json_decode($response_body, true);
+
         if (json_last_error() !== JSON_ERROR_NONE) {
-            return new \WP_Error('json_decode_error', 'Invalid JSON response: ' . json_last_error_msg());
+            $this->log_error('JSON decode error: ' . json_last_error_msg());
+            return new \WP_Error('json_error', 'Invalid JSON response: ' . json_last_error_msg());
         }
 
         // Validate response format
@@ -372,51 +349,37 @@ abstract class ChatShop_Abstract_API_Client
         $minute_count = get_transient($minute_key) ?: 0;
         $hour_count = get_transient($hour_key) ?: 0;
 
-        // Check limits
-        if (isset($this->rate_limits['requests_per_minute']) && $minute_count >= $this->rate_limits['requests_per_minute']) {
+        if ($minute_count >= $this->rate_limits['requests_per_minute']) {
             return false;
         }
 
-        if (isset($this->rate_limits['requests_per_hour']) && $hour_count >= $this->rate_limits['requests_per_hour']) {
+        if ($hour_count >= $this->rate_limits['requests_per_hour']) {
             return false;
         }
-
-        // Increment counters
-        set_transient($minute_key, $minute_count + 1, 60);
-        set_transient($hour_key, $hour_count + 1, 3600);
 
         return true;
     }
 
     /**
-     * Get cache key for request
+     * Update rate limit counters
      *
      * @since 1.0.0
-     * @param string $url Request URL
-     * @param array $data Request data
-     * @return string Cache key
      */
-    protected function get_cache_key($url, $data = array())
+    protected function update_rate_limit_counters()
     {
-        $key_data = array(
-            'url' => $url,
-            'data' => $data,
-            'client' => $this->client_id
-        );
+        if (empty($this->rate_limits)) {
+            return;
+        }
 
-        return 'chatshop_api_cache_' . md5(wp_json_encode($key_data));
-    }
+        $current_time = current_time('timestamp');
+        $minute_key = "chatshop_api_rate_limit_{$this->client_id}_minute_" . floor($current_time / 60);
+        $hour_key = "chatshop_api_rate_limit_{$this->client_id}_hour_" . floor($current_time / 3600);
 
-    /**
-     * Get cached response
-     *
-     * @since 1.0.0
-     * @param string $cache_key Cache key
-     * @return array|false Cached response or false if not found
-     */
-    protected function get_cached_response($cache_key)
-    {
-        return get_transient($cache_key);
+        $minute_count = get_transient($minute_key) ?: 0;
+        $hour_count = get_transient($hour_key) ?: 0;
+
+        set_transient($minute_key, $minute_count + 1, 60);
+        set_transient($hour_key, $hour_count + 1, 3600);
     }
 
     /**
@@ -424,15 +387,32 @@ abstract class ChatShop_Abstract_API_Client
      *
      * @since 1.0.0
      * @param string $cache_key Cache key
-     * @param array $response Response data
+     * @param mixed $data Data to cache
+     * @param int $duration Cache duration in seconds
      */
-    protected function cache_response($cache_key, $response)
+    protected function cache_response($cache_key, $data, $duration = null)
     {
-        set_transient($cache_key, $response, $this->cache_duration);
+        if ($duration === null) {
+            $duration = $this->cache_duration;
+        }
+
+        set_transient($cache_key, $data, $duration);
     }
 
     /**
-     * Clear cache for specific pattern
+     * Get cached response
+     *
+     * @since 1.0.0
+     * @param string $cache_key Cache key
+     * @return mixed Cached data or false
+     */
+    protected function get_cached_response($cache_key)
+    {
+        return get_transient($cache_key);
+    }
+
+    /**
+     * Clear cache for pattern
      *
      * @since 1.0.0
      * @param string $pattern Cache key pattern
@@ -442,38 +422,22 @@ abstract class ChatShop_Abstract_API_Client
         global $wpdb;
 
         if (empty($pattern)) {
-            $pattern = "chatshop_api_cache_{$this->client_id}_%";
+            $pattern = "chatshop_api_{$this->client_id}_%";
         }
 
         $wpdb->query(
             $wpdb->prepare(
                 "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
-                $pattern
+                "_transient_{$pattern}"
             )
         );
-    }
 
-    /**
-     * Check if in test mode
-     *
-     * @since 1.0.0
-     * @return bool Whether in test mode
-     */
-    protected function is_test_mode()
-    {
-        // Override in child classes
-        return defined('WP_DEBUG') && WP_DEBUG;
-    }
-
-    /**
-     * Get last response
-     *
-     * @since 1.0.0
-     * @return array Last response data
-     */
-    public function get_last_response()
-    {
-        return $this->last_response;
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+                "_transient_timeout_{$pattern}"
+            )
+        );
     }
 
     /**
@@ -497,7 +461,7 @@ abstract class ChatShop_Abstract_API_Client
      */
     public function test_connection()
     {
-        $response = $this->request($this->get_health_endpoint(), array(), 'GET');
+        $response = $this->make_request('GET', $this->get_health_endpoint());
 
         if (is_wp_error($response)) {
             return $response;
@@ -578,7 +542,7 @@ abstract class ChatShop_Abstract_API_Client
     }
 
     /**
-     * Decrypt API key
+     * Decrypt API key - FIXED VISIBILITY
      *
      * @since 1.0.0
      * @param string $encrypted_key Encrypted key
@@ -655,8 +619,30 @@ abstract class ChatShop_Abstract_API_Client
             'api_version' => $this->api_version,
             'timeout' => $this->timeout,
             'debug' => $this->debug,
-            'last_response_code' => $this->last_response['code'] ?? null,
-            'cache_duration' => $this->cache_duration
+            'last_response_code' => isset($this->last_response['response']['code']) ? $this->last_response['response']['code'] : null,
+            'rate_limits' => $this->rate_limits
         );
+    }
+
+    /**
+     * Set debug mode
+     *
+     * @since 1.0.0
+     * @param bool $debug Debug status
+     */
+    public function set_debug($debug)
+    {
+        $this->debug = (bool) $debug;
+    }
+
+    /**
+     * Get last response
+     *
+     * @since 1.0.0
+     * @return array Last response data
+     */
+    public function get_last_response()
+    {
+        return $this->last_response;
     }
 }
